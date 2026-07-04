@@ -1,6 +1,6 @@
 import type {IpcRendererEvent} from 'electron';
 import {ipcRenderer} from 'electron';
-import type {BridgeMessage, SettingOptions} from '../../../shared/types/common';
+import type {BridgeMessage, ManagedBrowserCoreStatus, SettingOptions} from '../../../shared/types/common';
 
 export const CommonBridge = {
   async download(path: string) {
@@ -29,6 +29,10 @@ export const CommonBridge = {
   },
   async saveSettings(settings: SettingOptions) {
     const result = await ipcRenderer.invoke('common-save-settings', settings);
+    return result;
+  },
+  async getManagedBrowserStatus(): Promise<ManagedBrowserCoreStatus> {
+    const result = await ipcRenderer.invoke('common-managed-browser-status');
     return result;
   },
   async getLogs(logModule: 'Main' | 'Windows' | 'Proxy' | 'Services' | 'Api') {

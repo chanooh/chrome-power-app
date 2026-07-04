@@ -16,6 +16,7 @@ import {db} from '../db';
 import {getProxyInfo} from './prepare';
 import * as ProxyChain from 'proxy-chain';
 import {ensureProfileCachePath, getSettings} from '../utils/get-settings';
+import {MANAGED_CHROMIUM_VERSION, resolveManagedBrowserCore} from '../browser-core/managed-core';
 // import {randomFingerprint} from '../services/window-service';
 import {bridgeMessageToUI, getClientPort, getMainWindow} from '../mainWindow';
 import {Mutex} from 'async-mutex';
@@ -23,7 +24,8 @@ import {Mutex} from 'async-mutex';
 import {existsSync, mkdirSync} from 'fs';
 import api from '../../../shared/api/api';
 import {ExtensionDB} from '../db/extension';
-import { getPort } from '../server';
+import {getPort} from '../server';
+import type {SettingOptions} from '../../../shared/types/common';
 
 const mutex = new Mutex();
 
@@ -89,14 +91,26 @@ const HOST = '127.0.0.1';
 //   }
 // }
 
-const getDriverPath = () => {
-  const settings = getSettings();
-
-  if (settings.useLocalChrome) {
-    return settings.localChromePath;
-  } else {
-    return settings.chromiumBinPath;
+const getBrowserLaunchTarget = (settings: SettingOptions) => {
+  if (settings.browserMode === 'managed') {
+    const managedCore = resolveManagedBrowserCore({
+      rootPath: settings.managedBrowserRoot,
+      manifestPath: settings.managedBrowserManifestPath,
+      verifyHash: true,
+      verifyVersion: true,
+    });
+    return {
+      driverPath: managedCore.executablePath,
+      profileDirectorySegments: ['managed-chromium', MANAGED_CHROMIUM_VERSION],
+      managed: true,
+    };
   }
+
+  return {
+    driverPath: settings.localChromePath || settings.chromiumBinPath,
+    profileDirectorySegments: ['chrome'],
+    managed: false,
+  };
 };
 
 const getAvailablePort = async () => {
@@ -195,10 +209,23 @@ export async function openFingerprintWindow(id: number, headless = false) {
       return null;
     }
 
+    let launchTarget;
+    try {
+      launchTarget = getBrowserLaunchTarget(settings);
+    } catch (error) {
+      const message = (error as Error).message;
+      logger.error(`Browser core is unavailable: ${message}`);
+      bridgeMessageToUI({
+        type: 'error',
+        text: message,
+      });
+      return null;
+    }
+
     const win = BrowserWindow.getAllWindows()[0];
     const windowDataDir = join(
       cachePath,
-      settings.useLocalChrome ? 'chrome' : 'chromium',
+      ...launchTarget.profileDirectorySegments,
       windowData.profile_id,
     );
 
@@ -223,7 +250,7 @@ export async function openFingerprintWindow(id: number, headless = false) {
       }
     }
 
-    const driverPath = getDriverPath();
+    const driverPath = launchTarget.driverPath;
     let ipInfo = {timeZone: '', ip: '', ll: [], country: ''};
     if (windowData.proxy_id && proxyData.ip) {
       ipInfo = await getProxyInfo(proxyData);
@@ -258,35 +285,34 @@ export async function openFingerprintWindow(id: number, headless = false) {
       }
 
       const isMac = process.platform === 'darwin';
-      const launchParamter = settings.useLocalChrome
+      const launchParamter = !launchTarget.managed
         ? [
+            '--remote-debugging-address=127.0.0.1',
             `--remote-debugging-port=${chromePort}`,
             `--user-data-dir=${windowDataDir}`,
             '--no-first-run',
           ]
         : [
-            // Mac 特定参数
-            ...(isMac ? ['--args'] : []),
-
             // `--extended-parameters=${btoa(JSON.stringify(fingerprint))}`,
             '--force-color-profile=srgb',
             '--no-first-run',
             '--no-default-browser-check',
             '--metrics-recording-only',
+            '--disable-background-networking',
             '--disable-background-mode',
+            '--disable-component-update',
+            '--disable-sync',
+            '--remote-debugging-address=127.0.0.1',
             `--remote-debugging-port=${chromePort}`,
             `--user-data-dir=${windowDataDir}`,
             // `--user-agent=${fingerprint?.ua}`,
             '--unhandled-rejections=strict',
-
-            // Mac 特定安全参数
-            ...(isMac ? ['--no-sandbox', '--disable-setuid-sandbox'] : []),
           ];
 
       if (finalProxy) {
         launchParamter.push(`--proxy-server=${finalProxy}`);
       }
-      if (ipInfo?.timeZone && !settings.useLocalChrome) {
+      if (ipInfo?.timeZone && launchTarget.managed) {
         launchParamter.push(`--timezone=${ipInfo.timeZone}`);
         launchParamter.push(`--tz=${ipInfo.timeZone}`);
       }
