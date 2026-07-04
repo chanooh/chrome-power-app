@@ -32,6 +32,7 @@ const INSTALLED_APP = join(INSTALLED_VERSION_DIR, 'Chromium.app');
 const INSTALLED_EXECUTABLE = join(INSTALLED_APP, 'Contents', 'MacOS', 'Chromium');
 const MANIFEST_PATH = join(INSTALLED_VERSION_DIR, 'manifest.json');
 const XCODE_CANDIDATES = [
+  '/Volumes/F/MacOffload/Xcode/Xcode.app/Contents/Developer',
   '/Volumes/F/Applications/Xcode.app/Contents/Developer',
   '/Applications/Xcode.app/Contents/Developer',
 ];

@@ -31,6 +31,12 @@ P1 将默认浏览器运行时从用户本机 Chrome 切换为项目管理的固
 当前实现优先使用：
 
 ```text
+/Volumes/F/MacOffload/Xcode/Xcode.app
+```
+
+其次使用：
+
+```text
 /Volumes/F/Applications/Xcode.app
 ```
 
@@ -40,7 +46,25 @@ P1 将默认浏览器运行时从用户本机 Chrome 切换为项目管理的固
 /Applications/Xcode.app
 ```
 
-建议从 Apple Developer 手动下载 Xcode `.xip` 到 `/Volumes/F/Downloads`，展开后移动到 `/Volumes/F/Applications/Xcode.app`。不要使用 App Store 默认安装方式，否则 Xcode 会安装到系统盘。
+建议从 Apple Developer 手动下载 Xcode `.xip` 到 `/Volumes/F/Downloads`，展开后移动到 `/Volumes/F/MacOffload/Xcode/Xcode.app`。不要使用 App Store 默认安装方式，否则 Xcode 会安装到系统盘。
+
+如果需要兼容 Apple 工具的默认查找路径，可以让 `/Applications/Xcode.app` 指向 F 盘中的 Xcode：
+
+```text
+/Applications/Xcode.app -> /Volumes/F/MacOffload/Xcode/Xcode.app
+```
+
+首次使用前需要在终端中接受 Xcode license：
+
+```bash
+sudo xcodebuild -license
+```
+
+或在你已经确认许可内容后执行：
+
+```bash
+sudo xcodebuild -license accept
+```
 
 如果 Chromium 工具或 Xcode 报权限问题，可以启用 F 盘 ownership：
 
