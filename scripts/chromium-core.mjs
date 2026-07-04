@@ -4,6 +4,7 @@ import {createHash} from 'node:crypto';
 import {
   cpSync,
   existsSync,
+  mkdtempSync,
   mkdirSync,
   readFileSync,
   rmSync,
@@ -11,7 +12,9 @@ import {
   writeFileSync,
 } from 'node:fs';
 import {join} from 'node:path';
-import {execFileSync, spawnSync} from 'node:child_process';
+import {execFileSync, spawn, spawnSync} from 'node:child_process';
+import {get as httpGet} from 'node:http';
+import {createServer} from 'node:net';
 
 const VOLUME_PATH = '/Volumes/F';
 const BUILD_ROOT = join(VOLUME_PATH, 'ChromePowerBuild');
@@ -77,6 +80,10 @@ function output(cmd, args, options = {}) {
     stdio: ['ignore', 'pipe', 'pipe'],
     ...options,
   }).trim();
+}
+
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 function buildEnv() {
@@ -294,6 +301,136 @@ function verifyCore() {
     fail(`Chromium version mismatch: ${versionOutput}`);
   }
   log(`verified executable: ${versionOutput}`);
+  return verifyCdpStartup();
+}
+
+function getFreeLocalPort() {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.on('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      const port = typeof address === 'object' && address ? address.port : 0;
+      server.close(error => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        if (!port) {
+          reject(new Error('Could not allocate a local CDP port.'));
+          return;
+        }
+        resolve(port);
+      });
+    });
+  });
+}
+
+function readCdpVersion(port) {
+  return new Promise((resolve, reject) => {
+    const req = httpGet(
+      {
+        hostname: '127.0.0.1',
+        port,
+        path: '/json/version',
+        timeout: 1000,
+      },
+      res => {
+        let body = '';
+        res.setEncoding('utf8');
+        res.on('data', chunk => {
+          body += chunk;
+        });
+        res.on('end', () => {
+          if (res.statusCode !== 200) {
+            reject(new Error(`CDP returned HTTP ${res.statusCode}: ${body}`));
+            return;
+          }
+          try {
+            resolve(JSON.parse(body));
+          } catch (error) {
+            reject(new Error(`CDP returned invalid JSON: ${error.message}`));
+          }
+        });
+      },
+    );
+    req.on('timeout', () => {
+      req.destroy(new Error('CDP request timed out.'));
+    });
+    req.on('error', reject);
+  });
+}
+
+async function waitForCdpVersion(port, child, getStderr) {
+  const deadline = Date.now() + 30000;
+  let lastError = new Error('CDP did not respond yet.');
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) {
+      fail(`Chromium exited before CDP became available.\n${getStderr()}`);
+    }
+    try {
+      return await readCdpVersion(port);
+    } catch (error) {
+      lastError = error;
+      await delay(500);
+    }
+  }
+  fail(`Timed out waiting for CDP on 127.0.0.1:${port}: ${lastError.message}\n${getStderr()}`);
+}
+
+async function stopProcess(child) {
+  if (child.exitCode !== null || child.killed) {
+    return;
+  }
+  child.kill('SIGTERM');
+  await Promise.race([
+    new Promise(resolve => child.once('exit', resolve)),
+    delay(3000).then(() => {
+      if (child.exitCode === null && !child.killed) {
+        child.kill('SIGKILL');
+      }
+    }),
+  ]);
+}
+
+async function verifyCdpStartup() {
+  const profileRoot = join(VOLUME_PATH, 'ChromePowerCache', 'managed-chromium', VERSION);
+  mkdirSync(profileRoot, {recursive: true});
+  const profileDir = mkdtempSync(join(profileRoot, 'verify-'));
+  const port = await getFreeLocalPort();
+  const args = [
+    `--user-data-dir=${profileDir}`,
+    '--remote-debugging-address=127.0.0.1',
+    `--remote-debugging-port=${port}`,
+    '--disable-component-update',
+    '--disable-sync',
+    '--disable-background-networking',
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--headless=new',
+    '--disable-gpu',
+    'about:blank',
+  ];
+  let stderr = '';
+  log(`starting CDP smoke test on 127.0.0.1:${port}`);
+  const child = spawn(INSTALLED_EXECUTABLE, args, {
+    stdio: ['ignore', 'ignore', 'pipe'],
+    env: buildEnv(),
+  });
+  child.stderr.on('data', chunk => {
+    stderr = `${stderr}${chunk.toString()}`.slice(-4000);
+  });
+  try {
+    const version = await waitForCdpVersion(port, child, () => stderr.trim());
+    const browserVersion = String(version.Browser || '');
+    if (!browserVersion.includes(VERSION)) {
+      fail(`CDP browser version mismatch: ${browserVersion}`);
+    }
+    log(`verified CDP startup: ${browserVersion}`);
+  } finally {
+    await stopProcess(child);
+    rmSync(profileDir, {recursive: true, force: true});
+  }
 }
 
 function printHelp() {
@@ -304,7 +441,7 @@ Commands:
   sync          Checkout Chromium ${TAG} at ${COMMIT} under /Volumes/F.
   build         Build Chromium arm64 from the checked out source.
   install-core  Copy Chromium.app into /Volumes/F/ChromePowerCore and write manifest.
-  verify        Validate installed manifest/hash/version.
+  verify        Validate installed manifest/hash/version and CDP startup.
 `);
 }
 
@@ -318,7 +455,7 @@ try {
   } else if (command === 'install-core') {
     installCore();
   } else if (command === 'verify') {
-    verifyCore();
+    await verifyCore();
   } else {
     printHelp();
   }

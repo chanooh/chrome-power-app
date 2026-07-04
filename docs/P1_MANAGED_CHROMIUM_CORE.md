@@ -132,6 +132,7 @@ npm run chromium:verify
 - manifest 版本、tag、commit、arch 是否匹配。
 - Chromium 可执行文件 sha256 是否匹配。
 - `Chromium --version` 是否包含锁定版本。
+- 临时启动 Chromium，绑定 `127.0.0.1:<随机端口>`，读取 CDP `/json/version`，确认内核可被本地 DevTools Protocol 控制。
 
 任一失败都会报错并停止，不会自动 fallback 到本机 Chrome。
 
@@ -139,7 +140,7 @@ npm run chromium:verify
 
 完成构建和安装后：
 
-1. `npm run chromium:verify` 成功。
+1. `npm run chromium:verify` 成功，包括 manifest/hash/version 和 CDP 启动校验。
 2. 设置页显示 managed core `Ready`。
 3. 新 profile 写入 `/Volumes/F/ChromePowerCache/managed-chromium/150.0.7871.47/`。
 4. 本机 Chrome 版本变化不影响 managed profile。
