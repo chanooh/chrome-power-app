@@ -17,6 +17,8 @@ const VOLUME_PATH = '/Volumes/F';
 const BUILD_ROOT = join(VOLUME_PATH, 'ChromePowerBuild');
 const DEPOT_TOOLS_PATH = join(BUILD_ROOT, 'depot_tools');
 const GIT_CACHE_PATH = join(BUILD_ROOT, 'git-cache');
+const CIPD_CACHE_DIR = join(BUILD_ROOT, 'cipd-cache');
+const VPYTHON_ROOT = join(BUILD_ROOT, 'vpython-root');
 const CHROMIUM_ROOT = join(BUILD_ROOT, 'chromium');
 const CHROMIUM_SRC = join(CHROMIUM_ROOT, 'src');
 const TMP_DIR = join(BUILD_ROOT, 'tmp');
@@ -84,7 +86,11 @@ function buildEnv() {
     ...process.env,
     PATH: `${DEPOT_TOOLS_PATH}:${process.env.PATH || ''}`,
     GIT_CACHE_PATH,
+    CIPD_CACHE_DIR,
+    VPYTHON_VIRTUALENV_ROOT: VPYTHON_ROOT,
     TMPDIR: TMP_DIR,
+    DEPOT_TOOLS_UPDATE: '0',
+    DEPOT_TOOLS_METRICS: '0',
     DEVELOPER_DIR: developerDir || process.env.DEVELOPER_DIR || '',
   };
 }
@@ -137,7 +143,7 @@ function assertXcode() {
 }
 
 function ensureDirectories() {
-  for (const dir of [BUILD_ROOT, GIT_CACHE_PATH, CHROMIUM_ROOT, TMP_DIR, CORE_ROOT]) {
+  for (const dir of [BUILD_ROOT, GIT_CACHE_PATH, CIPD_CACHE_DIR, VPYTHON_ROOT, CHROMIUM_ROOT, TMP_DIR, CORE_ROOT]) {
     mkdirSync(dir, {recursive: true});
   }
 }

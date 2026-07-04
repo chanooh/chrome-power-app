@@ -18,6 +18,8 @@ P1 将默认浏览器运行时从用户本机 Chrome 切换为项目管理的固
 ```text
 /Volumes/F/ChromePowerBuild/depot_tools
 /Volumes/F/ChromePowerBuild/git-cache
+/Volumes/F/ChromePowerBuild/cipd-cache
+/Volumes/F/ChromePowerBuild/vpython-root
 /Volumes/F/ChromePowerBuild/chromium/src
 /Volumes/F/ChromePowerBuild/tmp
 /Volumes/F/ChromePowerCore/chromium/150.0.7871.47/mac-arm64/Chromium.app
