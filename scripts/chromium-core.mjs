@@ -44,7 +44,6 @@ const GN_ARGS = [
   'is_debug=false',
   'is_component_build=false',
   'symbol_level=0',
-  'enable_nacl=false',
   'use_remoteexec=false',
   'use_lld=false',
 ];
@@ -140,6 +139,36 @@ function assertXcode() {
   }
   log(`using Xcode developer dir: ${developerDir}`);
   log(`using macOS SDK: ${sdkVersion} (${sdkPath})`);
+  assertMetalToolchain(env, developerDir);
+}
+
+function assertMetalToolchain(env, developerDir) {
+  try {
+    execFileSync('xcrun', ['metal', '-v'], {
+      encoding: 'utf8',
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch {
+    let buildVersion = '<build version from `xcodebuild -showComponent MetalToolchain`>';
+    try {
+      const component = execFileSync('xcodebuild', ['-showComponent', 'MetalToolchain', '-json'], {
+        encoding: 'utf8',
+        env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      buildVersion = JSON.parse(component).buildVersion || buildVersion;
+    } catch {
+      // Keep the generic command hint below when Xcode cannot report component metadata.
+    }
+    fail(
+      [
+        'Xcode Metal Toolchain is missing; Chromium cannot compile ANGLE Metal shaders.',
+        `Run: DEVELOPER_DIR=${developerDir} xcodebuild -runFirstLaunch`,
+        `Then run: DEVELOPER_DIR=${developerDir} xcodebuild -downloadComponent MetalToolchain -buildVersion ${buildVersion}`,
+      ].join('\n'),
+    );
+  }
 }
 
 function ensureDirectories() {

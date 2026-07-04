@@ -68,6 +68,26 @@ sudo xcodebuild -license
 sudo xcodebuild -license accept
 ```
 
+首次初始化 Xcode 组件：
+
+```bash
+DEVELOPER_DIR=/Volumes/F/MacOffload/Xcode/Xcode.app/Contents/Developer xcodebuild -runFirstLaunch
+```
+
+Chromium 的 ANGLE Metal shader 构建需要 Xcode Metal Toolchain。先查看可用 build version：
+
+```bash
+DEVELOPER_DIR=/Volumes/F/MacOffload/Xcode/Xcode.app/Contents/Developer xcodebuild -showComponent MetalToolchain -json
+```
+
+然后按输出里的 `buildVersion` 下载，例如当前机器为 `17F109`：
+
+```bash
+DEVELOPER_DIR=/Volumes/F/MacOffload/Xcode/Xcode.app/Contents/Developer xcodebuild -downloadComponent MetalToolchain -buildVersion 17F109
+```
+
+该组件由 Apple 安装到系统资产缓存，例如 `/System/Library/AssetsV2/com_apple_MobileAsset_MetalToolchain`。这部分不支持强制搬到 F 盘，本机实测约 673MB；Xcode.app 本体仍在 F 盘。
+
 如果 Chromium 工具或 Xcode 报权限问题，可以启用 F 盘 ownership：
 
 ```bash
@@ -91,6 +111,7 @@ npm run chromium:verify
 - 当前系统是 macOS arm64。
 - `/Volumes/F` 已挂载且是 APFS。
 - 完整 Xcode 可用，`xcrun --show-sdk-path` 指向 Xcode SDK。
+- Xcode Metal Toolchain 可用，`xcrun metal -v` 能正常执行。
 - `depot_tools` 已 checkout 并锁定到指定 commit。
 
 ## 运行时行为
