@@ -4,7 +4,7 @@ import {ExtensionDB} from '../db/extension';
 import {copyFileSync, mkdirSync, existsSync, readFileSync, unlinkSync, rmdirSync} from 'fs';
 import extract from 'extract-zip';
 import {join} from 'path';
-import {getSettings} from '../utils/get-settings';
+import {ensureProfileCachePath, getSettings} from '../utils/get-settings';
 import {db} from '../db';
 import {readdir, rename} from 'fs/promises';
 
@@ -55,12 +55,13 @@ export const initExtensionService = () => {
     async (_, filePath: string, existingExtensionId?: number) => {
       try {
         const settings = getSettings();
+        ensureProfileCachePath(settings.profileCachePath);
         // 获取应用数据目录
         const extensionsPath = join(settings.profileCachePath, 'extensions');
 
         // 确保扩展目录存在
         if (!existsSync(extensionsPath)) {
-          mkdirSync(extensionsPath);
+          mkdirSync(extensionsPath, {recursive: true});
         }
 
         // 为每个扩展创建唯一目录

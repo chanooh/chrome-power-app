@@ -15,7 +15,7 @@ import {WINDOW_LOGGER_LABEL} from '../constants';
 import {db} from '../db';
 import {getProxyInfo} from './prepare';
 import * as ProxyChain from 'proxy-chain';
-import {getSettings} from '../utils/get-settings';
+import {ensureProfileCachePath, getSettings} from '../utils/get-settings';
 // import {randomFingerprint} from '../services/window-service';
 import {bridgeMessageToUI, getClientPort, getMainWindow} from '../mainWindow';
 import {Mutex} from 'async-mutex';
@@ -183,6 +183,17 @@ export async function openFingerprintWindow(id: number, headless = false) {
     const settings = getSettings();
 
     const cachePath = settings.profileCachePath;
+    try {
+      ensureProfileCachePath(cachePath);
+    } catch (error) {
+      const message = (error as Error).message;
+      logger.error(`Profile cache path is unavailable: ${message}`);
+      bridgeMessageToUI({
+        type: 'error',
+        text: message,
+      });
+      return null;
+    }
 
     const win = BrowserWindow.getAllWindows()[0];
     const windowDataDir = join(
