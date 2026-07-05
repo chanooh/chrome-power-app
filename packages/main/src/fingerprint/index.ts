@@ -26,6 +26,10 @@ import api from '../../../shared/api/api';
 import {ExtensionDB} from '../db/extension';
 import {getPort} from '../server';
 import type {SettingOptions} from '../../../shared/types/common';
+import {ensureInternalFingerprintExtension} from './internal-extension';
+import {buildBrowserLaunchParameters} from './launch-params';
+import {startFingerprintCdpSession, stopFingerprintCdpSession} from './cdp';
+import {serializeFingerprintSnapshot} from './snapshot';
 
 const mutex = new Mutex();
 
@@ -164,6 +168,10 @@ export async function openFingerprintWindow(id: number, headless = false) {
         // 如果能成功获取到浏览器信息，说明窗口仍然可用
         if (data) {
           logger.info(`Window ${id} is already running on port ${windowData.port}`);
+          const fingerprintSnapshot = await WindowDB.ensureFingerprintSnapshot(id, windowData);
+          if (data.webSocketDebuggerUrl) {
+            await startFingerprintCdpSession(id, data.webSocketDebuggerUrl, fingerprintSnapshot);
+          }
           // 获取浏览器实例，把窗口放到最前面
           const browser = await puppeteer.connect({
             browserWSEndpoint: data.webSocketDebuggerUrl,
@@ -259,16 +267,9 @@ export async function openFingerprintWindow(id: number, headless = false) {
       }
     }
 
-    // const fingerprint =
-    //   windowData.fingerprint && windowData.fingerprint !== '{}'
-    //     ? JSON.parse(windowData.fingerprint)
-    //     : randomFingerprint();
-    // if (!windowData.fingerprint || windowData.fingerprint === '{}') {
-    //   await WindowDB.update(id, {
-    //     ...windowData,
-    //     fingerprint,
-    //   });
-    // }
+    const fingerprintSnapshot = await WindowDB.ensureFingerprintSnapshot(id, windowData);
+    windowData.ua = fingerprintSnapshot.ua;
+    windowData.fingerprint = serializeFingerprintSnapshot(fingerprintSnapshot);
 
     if (driverPath) {
       const chromePort = await getAvailablePort();
@@ -285,49 +286,24 @@ export async function openFingerprintWindow(id: number, headless = false) {
       }
 
       const isMac = process.platform === 'darwin';
-      const launchParamter = !launchTarget.managed
-        ? [
-            '--remote-debugging-address=127.0.0.1',
-            `--remote-debugging-port=${chromePort}`,
-            `--user-data-dir=${windowDataDir}`,
-            '--no-first-run',
-          ]
-        : [
-            // `--extended-parameters=${btoa(JSON.stringify(fingerprint))}`,
-            '--force-color-profile=srgb',
-            '--no-first-run',
-            '--no-default-browser-check',
-            '--metrics-recording-only',
-            '--disable-background-networking',
-            '--disable-background-mode',
-            '--disable-component-update',
-            '--disable-sync',
-            '--remote-debugging-address=127.0.0.1',
-            `--remote-debugging-port=${chromePort}`,
-            `--user-data-dir=${windowDataDir}`,
-            // `--user-agent=${fingerprint?.ua}`,
-            '--unhandled-rejections=strict',
-          ];
-
-      if (finalProxy) {
-        launchParamter.push(`--proxy-server=${finalProxy}`);
-      }
-      if (ipInfo?.timeZone && launchTarget.managed) {
-        launchParamter.push(`--timezone=${ipInfo.timeZone}`);
-        launchParamter.push(`--tz=${ipInfo.timeZone}`);
-      }
-      if (extensionData.length > 0) {
-        launchParamter.push(`--load-extension=${extensionData.map(e => e.path).join(',')}`);
-      }
-      if (headless) {
-        launchParamter.push('--headless=new'); // 使用新版 headless 模式
-        if (!isMac) {
-          launchParamter.push('--disable-gpu'); // 在 Mac 上不需要这个参数
-        }
-      } else {
-        launchParamter.push('--new-window');
-        launchParamter.push(`http://localhost:${getClientPort()}/#/start?windowId=${id}&serverPort=${getPort()}`);
-      }
+      const internalFingerprintExtensionPath = launchTarget.managed
+        ? ensureInternalFingerprintExtension(windowDataDir, fingerprintSnapshot)
+        : undefined;
+      const appStartUrl = getClientPort()
+        ? `http://localhost:${getClientPort()}/#/start?windowId=${id}&serverPort=${getPort()}`
+        : undefined;
+      const launchParamter = buildBrowserLaunchParameters({
+        managed: launchTarget.managed,
+        chromePort,
+        windowDataDir,
+        finalProxy,
+        headless,
+        isMac,
+        appStartUrl,
+        internalExtensionPath: internalFingerprintExtensionPath,
+        userExtensionPaths: extensionData.map(extension => extension.path),
+        snapshot: fingerprintSnapshot,
+      });
 
       // 添加调试参数（如果需要）
       if (process.env.NODE_ENV === 'development') {
@@ -395,6 +371,9 @@ export async function openFingerprintWindow(id: number, headless = false) {
       try {
         const browserURL = `http://${HOST}:${chromePort}`;
         const {data} = await api.get(browserURL + '/json/version');
+        if (launchTarget.managed && data.webSocketDebuggerUrl) {
+          await startFingerprintCdpSession(id, data.webSocketDebuggerUrl, fingerprintSnapshot);
+        }
         await WindowDB.update(windowData.id, {
           ...windowData,
           status: 2,
@@ -528,6 +507,7 @@ export async function resetWindowStatus(id: number) {
 }
 
 export async function closeFingerprintWindow(id: number, force = false) {
+  stopFingerprintCdpSession(id);
   const window = await WindowDB.getById(id);
   const port = window.port;
   if (force && port) {
