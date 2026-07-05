@@ -5,6 +5,8 @@ import type {DB} from '../../../../../../shared/types/db';
 import {GroupBridge, TagBridge, ProxyBridge} from '#preload';
 import {TAG_COLORS} from '/@/constants';
 import {useTranslation} from 'react-i18next';
+import {MAC_DEVICE_TEMPLATE_OPTIONS} from '../../../../../../shared/constants/fingerprint';
+import type {MacDeviceTemplateId} from '../../../../../../shared/types/fingerprint';
 
 const {TextArea} = Input;
 const {Text} = Typography;
@@ -31,10 +33,26 @@ const WindowEditForm = ({
   useEffect(() => {
     if (JSON.stringify(formValue) === '{}') {
       form?.resetFields();
+      form?.setFieldsValue({fingerprint_template_id: 'auto'});
     } else {
-      form?.setFieldsValue(formValue);
+      form?.setFieldsValue({
+        ...formValue,
+        fingerprint_template_id: getFingerprintTemplateId(formValue),
+      });
     }
   }, [formValue]);
+
+  const getFingerprintTemplateId = (windowData: DB.Window): MacDeviceTemplateId => {
+    if (windowData.fingerprint_template_id) {
+      return windowData.fingerprint_template_id;
+    }
+    try {
+      const snapshot = windowData.fingerprint ? JSON.parse(windowData.fingerprint) : {};
+      return snapshot.requestedTemplateId || snapshot.templateId || 'auto';
+    } catch {
+      return 'auto';
+    }
+  };
 
   const fetchGroups = async () => {
     const groups = await GroupBridge?.getAll();
@@ -113,7 +131,7 @@ const WindowEditForm = ({
       disabled={loading}
       form={form}
       size="large"
-      initialValues={formValue}
+      initialValues={{...formValue, fingerprint_template_id: getFingerprintTemplateId(formValue)}}
       onValuesChange={formChangeCallback}
       labelCol={{span: 6}}
     >
@@ -160,6 +178,19 @@ const WindowEditForm = ({
           placeholder="UserAgent"
         />
       </Form.Item> */}
+
+      <Form.Item<FieldType>
+        name="fingerprint_template_id"
+        label="Fingerprint"
+      >
+        <Select
+          disabled={Boolean(formValue.id)}
+          options={MAC_DEVICE_TEMPLATE_OPTIONS.map(template => ({
+            label: template.name,
+            value: template.id,
+          }))}
+        />
+      </Form.Item>
 
       <Form.Item<FieldType>
         name="remark"
