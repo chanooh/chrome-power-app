@@ -1,4 +1,5 @@
 // types/models.d.ts
+import type {MacDeviceTemplateId} from './fingerprint';
 
 export namespace DB {
   export interface Window {
@@ -14,6 +15,7 @@ export namespace DB {
     updated_at?: string;
     ua?: string;
     fingerprint?: string;
+    fingerprint_template_id?: MacDeviceTemplateId;
     cookie?: string;
     /** 0: removed; 1: closed; 2: running; 3: Preparing  */
     status?: number;

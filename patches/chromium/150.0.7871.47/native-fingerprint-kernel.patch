@@ -1,0 +1,1149 @@
+diff --git a/content/renderer/renderer_blink_platform_impl.cc b/content/renderer/renderer_blink_platform_impl.cc
+index c2f071d20190e..856c6b8cde13f 100644
+--- a/content/renderer/renderer_blink_platform_impl.cc
++++ b/content/renderer/renderer_blink_platform_impl.cc
+@@ -665,12 +665,21 @@ void RendererBlinkPlatformImpl::GetWebRTCRendererPreferences(
+ 
+   *ip_handling_policy =
+       render_frame->GetRendererPreferences().webrtc_ip_handling_policy;
++  const bool chrome_power_fingerprint =
++      base::CommandLine::ForCurrentProcess()->HasSwitch(
++          "chrome-power-fingerprint");
++  if (chrome_power_fingerprint) {
++    *ip_handling_policy =
++        blink::mojom::WebRtcIpHandlingPolicy::kDisableNonProxiedUdp;
++  }
+   std::vector<blink::WebRtcIpHandlingUrlEntry> ip_handling_urls =
+       render_frame->GetRendererPreferences().webrtc_ip_handling_urls;
+-  for (const auto& per_url_entry : ip_handling_urls) {
+-    if (per_url_entry.url_pattern.Matches(gurl)) {
+-      *ip_handling_policy = per_url_entry.handling;
+-      break;
++  if (!chrome_power_fingerprint) {
++    for (const auto& per_url_entry : ip_handling_urls) {
++      if (per_url_entry.url_pattern.Matches(gurl)) {
++        *ip_handling_policy = per_url_entry.handling;
++        break;
++      }
+     }
+   }
+ 
+diff --git a/third_party/blink/renderer/core/execution_context/navigator_base.cc b/third_party/blink/renderer/core/execution_context/navigator_base.cc
+index cccfafe8f93a0..18d754c924587 100644
+--- a/third_party/blink/renderer/core/execution_context/navigator_base.cc
++++ b/third_party/blink/renderer/core/execution_context/navigator_base.cc
+@@ -10,6 +10,7 @@
+ #include "third_party/blink/renderer/core/execution_context/execution_context.h"
+ #include "third_party/blink/renderer/core/frame/navigator_concurrent_hardware.h"
+ #include "third_party/blink/renderer/core/probe/core_probes.h"
++#include "third_party/blink/renderer/platform/chrome_power/chrome_power_fingerprint.h"
+ #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+ #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
+ 
+@@ -47,11 +48,28 @@ NavigatorBase::NavigatorBase(ExecutionContext* context)
+     : NavigatorLanguage(context), ExecutionContextClient(context) {}
+ 
+ String NavigatorBase::userAgent() const {
++  const ChromePowerFingerprint& fingerprint = ChromePowerFingerprint::Get();
++  if (fingerprint.enabled()) {
++    String user_agent = fingerprint.StringAt({"ua"});
++    if (!user_agent.IsNull() && !user_agent.empty()) {
++      return user_agent;
++    }
++  }
+   ExecutionContext* execution_context = GetExecutionContext();
+   return execution_context ? execution_context->UserAgent() : String();
+ }
+ 
+ String NavigatorBase::platform() const {
++  const ChromePowerFingerprint& fingerprint = ChromePowerFingerprint::Get();
++  if (fingerprint.enabled()) {
++    String platform = fingerprint.StringAt({"platform"});
++    if (platform.IsNull() || platform.empty()) {
++      platform = fingerprint.StringAt({"uaCh", "platform"});
++    }
++    if (!platform.IsNull() && !platform.empty()) {
++      return platform;
++    }
++  }
+ #if BUILDFLAG(IS_ANDROID)
+   // We need to check the ReduceUserAgentMinorVersion feature flag for
+   // Android WebView, which does not currently ship a reduced User-Agent.
+@@ -70,6 +88,13 @@ void NavigatorBase::Trace(Visitor* visitor) const {
+ }
+ 
+ unsigned int NavigatorBase::hardwareConcurrency() const {
++  const ChromePowerFingerprint& fingerprint = ChromePowerFingerprint::Get();
++  if (fingerprint.enabled()) {
++    std::optional<int> value = fingerprint.IntAt({"hardwareConcurrency"});
++    if (value && *value > 0) {
++      return static_cast<unsigned int>(*value);
++    }
++  }
+   unsigned int hardware_concurrency =
+       NavigatorConcurrentHardware::hardwareConcurrency();
+ 
+diff --git a/third_party/blink/renderer/core/frame/local_dom_window.cc b/third_party/blink/renderer/core/frame/local_dom_window.cc
+index f36ed413289cb..977844b3e2f0a 100644
+--- a/third_party/blink/renderer/core/frame/local_dom_window.cc
++++ b/third_party/blink/renderer/core/frame/local_dom_window.cc
+@@ -151,6 +151,7 @@
+ #include "third_party/blink/renderer/platform/bindings/script_state.h"
+ #include "third_party/blink/renderer/platform/bindings/source_location.h"
+ #include "third_party/blink/renderer/platform/blob/blob_url.h"
++#include "third_party/blink/renderer/platform/chrome_power/chrome_power_fingerprint.h"
+ #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+ #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
+ #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
+@@ -1823,6 +1824,15 @@ double LocalDOMWindow::devicePixelRatio() const {
+   if (!GetFrame())
+     return 0.0;
+ 
++  const ChromePowerFingerprint& fingerprint = ChromePowerFingerprint::Get();
++  if (fingerprint.enabled()) {
++    std::optional<double> value =
++        fingerprint.DoubleAt({"screen", "deviceScaleFactor"});
++    if (value && *value > 0) {
++      return *value;
++    }
++  }
++
+   return GetFrame()->DevicePixelRatio();
+ }
+ 
+diff --git a/third_party/blink/renderer/core/frame/navigator_concurrent_hardware.cc b/third_party/blink/renderer/core/frame/navigator_concurrent_hardware.cc
+index f5c0db2d1b58d..88198eb4335fe 100644
+--- a/third_party/blink/renderer/core/frame/navigator_concurrent_hardware.cc
++++ b/third_party/blink/renderer/core/frame/navigator_concurrent_hardware.cc
+@@ -5,10 +5,18 @@
+ #include "third_party/blink/renderer/core/frame/navigator_concurrent_hardware.h"
+ 
+ #include "base/system/sys_info.h"
++#include "third_party/blink/renderer/platform/chrome_power/chrome_power_fingerprint.h"
+ 
+ namespace blink {
+ 
+ unsigned NavigatorConcurrentHardware::hardwareConcurrency() const {
++  const ChromePowerFingerprint& fingerprint = ChromePowerFingerprint::Get();
++  if (fingerprint.enabled()) {
++    std::optional<int> value = fingerprint.IntAt({"hardwareConcurrency"});
++    if (value && *value > 0) {
++      return static_cast<unsigned>(*value);
++    }
++  }
+   return static_cast<unsigned>(base::SysInfo::NumberOfProcessors());
+ }
+ 
+diff --git a/third_party/blink/renderer/core/frame/navigator_device_memory.cc b/third_party/blink/renderer/core/frame/navigator_device_memory.cc
+index 05fa33e4568e8..e912e4ecfef93 100644
+--- a/third_party/blink/renderer/core/frame/navigator_device_memory.cc
++++ b/third_party/blink/renderer/core/frame/navigator_device_memory.cc
+@@ -8,10 +8,18 @@
+ #include "third_party/blink/public/mojom/use_counter/metrics/web_feature.mojom-shared.h"
+ #include "third_party/blink/renderer/core/dom/document.h"
+ #include "third_party/blink/renderer/core/frame/local_dom_window.h"
++#include "third_party/blink/renderer/platform/chrome_power/chrome_power_fingerprint.h"
+ 
+ namespace blink {
+ 
+ float NavigatorDeviceMemory::deviceMemory() const {
++  const ChromePowerFingerprint& fingerprint = ChromePowerFingerprint::Get();
++  if (fingerprint.enabled()) {
++    std::optional<double> value = fingerprint.DoubleAt({"deviceMemory"});
++    if (value && *value > 0) {
++      return static_cast<float>(*value);
++    }
++  }
+   return ApproximatedDeviceMemory::GetApproximatedDeviceMemory();
+ }
+ 
+diff --git a/third_party/blink/renderer/core/frame/navigator_language.cc b/third_party/blink/renderer/core/frame/navigator_language.cc
+index 75cd3461317b7..f50fb3e9647c5 100644
+--- a/third_party/blink/renderer/core/frame/navigator_language.cc
++++ b/third_party/blink/renderer/core/frame/navigator_language.cc
+@@ -9,6 +9,7 @@
+ #include "third_party/blink/public/common/switches.h"
+ #include "third_party/blink/renderer/core/frame/web_feature.h"
+ #include "third_party/blink/renderer/core/probe/core_probes.h"
++#include "third_party/blink/renderer/platform/chrome_power/chrome_power_fingerprint.h"
+ #include "third_party/blink/renderer/platform/language.h"
+ #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
+ 
+@@ -69,6 +70,16 @@ void NavigatorLanguage::SetLanguagesForTesting(const String& languages) {
+ }
+ 
+ void NavigatorLanguage::EnsureUpdatedLanguage() {
++  const ChromePowerFingerprint& fingerprint = ChromePowerFingerprint::Get();
++  if (fingerprint.enabled()) {
++    Vector<String> languages = fingerprint.Languages();
++    if (!languages.empty()) {
++      languages_ = std::move(languages);
++      languages_dirty_ = false;
++      return;
++    }
++  }
++
+   String accept_languages_override;
+   probe::ApplyAcceptLanguageOverride(execution_context_,
+                                      &accept_languages_override);
+diff --git a/third_party/blink/renderer/core/frame/navigator_ua.cc b/third_party/blink/renderer/core/frame/navigator_ua.cc
+index 22483bb57adf7..b3a2531462316 100644
+--- a/third_party/blink/renderer/core/frame/navigator_ua.cc
++++ b/third_party/blink/renderer/core/frame/navigator_ua.cc
+@@ -4,9 +4,12 @@
+ 
+ #include "third_party/blink/renderer/core/frame/navigator_ua.h"
+ 
++#include <utility>
++
+ #include "base/compiler_specific.h"
+ #include "third_party/blink/public/common/user_agent/user_agent_metadata.h"
+ #include "third_party/blink/renderer/core/frame/navigator_ua_data.h"
++#include "third_party/blink/renderer/platform/chrome_power/chrome_power_fingerprint.h"
+ #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
+ 
+ namespace blink {
+@@ -15,6 +18,56 @@ NavigatorUAData* NavigatorUA::userAgentData() {
+   NavigatorUAData* ua_data =
+       MakeGarbageCollected<NavigatorUAData>(GetUAExecutionContext());
+ 
++  const ChromePowerFingerprint& fingerprint = ChromePowerFingerprint::Get();
++  if (fingerprint.enabled()) {
++    UserAgentBrandList brand_version_list;
++    if (const base::ListValue* brands =
++            fingerprint.ListAt({"uaCh", "brands"})) {
++      for (const auto& value : *brands) {
++        const base::DictValue* dict = value.GetIfDict();
++        const std::string* brand = dict ? dict->FindString("brand") : nullptr;
++        const std::string* version =
++            dict ? dict->FindString("version") : nullptr;
++        if (brand && version) {
++          brand_version_list.emplace_back(*brand, *version);
++        }
++      }
++    }
++    ua_data->SetBrandVersionList(brand_version_list);
++    ua_data->SetMobile(fingerprint.BoolAt({"uaCh", "mobile"}).value_or(false));
++    ua_data->SetPlatform(fingerprint.StringAt({"uaCh", "platform"}),
++                         fingerprint.StringAt({"uaCh", "platformVersion"}));
++    ua_data->SetArchitecture(fingerprint.StringAt({"uaCh", "architecture"}));
++    ua_data->SetModel(fingerprint.StringAt({"uaCh", "model"}));
++    String full_version = fingerprint.StringAt({"uaCh", "fullVersion"});
++    if (full_version.IsNull() || full_version.empty()) {
++      full_version = fingerprint.StringAt({"uaCh", "uaFullVersion"});
++    }
++    ua_data->SetUAFullVersion(full_version);
++    ua_data->SetBitness(fingerprint.StringAt({"uaCh", "bitness"}));
++
++    UserAgentBrandList full_version_list;
++    if (const base::ListValue* brands =
++            fingerprint.ListAt({"uaCh", "fullVersionList"})) {
++      for (const auto& value : *brands) {
++        const base::DictValue* dict = value.GetIfDict();
++        const std::string* brand = dict ? dict->FindString("brand") : nullptr;
++        const std::string* version =
++            dict ? dict->FindString("version") : nullptr;
++        if (brand && version) {
++          full_version_list.emplace_back(*brand, *version);
++        }
++      }
++    }
++    ua_data->SetFullVersionList(full_version_list);
++    ua_data->SetWoW64(false);
++
++    Vector<String> form_factors;
++    form_factors.push_back("Desktop");
++    ua_data->SetFormFactors(std::move(form_factors));
++    return ua_data;
++  }
++
+   UserAgentMetadata metadata = GetUserAgentMetadata();
+   ua_data->SetBrandVersionList(metadata.brand_version_list);
+   ua_data->SetMobile(metadata.mobile);
+diff --git a/third_party/blink/renderer/core/frame/screen.cc b/third_party/blink/renderer/core/frame/screen.cc
+index 69ffc2b05f75d..23a73b92cbcea 100644
+--- a/third_party/blink/renderer/core/frame/screen.cc
++++ b/third_party/blink/renderer/core/frame/screen.cc
+@@ -35,6 +35,7 @@
+ #include "third_party/blink/renderer/core/frame/local_frame.h"
+ #include "third_party/blink/renderer/core/frame/settings.h"
+ #include "third_party/blink/renderer/core/page/chrome_client.h"
++#include "third_party/blink/renderer/platform/chrome_power/chrome_power_fingerprint.h"
+ #include "ui/display/screen_info.h"
+ #include "ui/display/screen_infos.h"
+ 
+@@ -81,12 +82,26 @@ bool Screen::AreWebExposedScreenPropertiesEqual(
+ int Screen::height() const {
+   if (!DomWindow())
+     return 0;
++  const ChromePowerFingerprint& fingerprint = ChromePowerFingerprint::Get();
++  if (fingerprint.enabled()) {
++    std::optional<int> value = fingerprint.IntAt({"screen", "height"});
++    if (value && *value > 0) {
++      return *value;
++    }
++  }
+   return GetRect(/*available=*/false).height();
+ }
+ 
+ int Screen::width() const {
+   if (!DomWindow())
+     return 0;
++  const ChromePowerFingerprint& fingerprint = ChromePowerFingerprint::Get();
++  if (fingerprint.enabled()) {
++    std::optional<int> value = fingerprint.IntAt({"screen", "width"});
++    if (value && *value > 0) {
++      return *value;
++    }
++  }
+   return GetRect(/*available=*/false).width();
+ }
+ 
+@@ -100,6 +115,13 @@ unsigned Screen::colorDepth() const {
+   if (!DomWindow()) {
+     return unknown_color_depth;
+   }
++  const ChromePowerFingerprint& fingerprint = ChromePowerFingerprint::Get();
++  if (fingerprint.enabled()) {
++    std::optional<int> value = fingerprint.IntAt({"screen", "colorDepth"});
++    if (value && *value > 0) {
++      return base::saturated_cast<unsigned>(*value);
++    }
++  }
+   return GetScreenInfo().depth == 0
+              ? unknown_color_depth
+              : base::saturated_cast<unsigned>(GetScreenInfo().depth);
+@@ -112,24 +134,46 @@ unsigned Screen::pixelDepth() const {
+ int Screen::availLeft() const {
+   if (!DomWindow())
+     return 0;
++  const ChromePowerFingerprint& fingerprint = ChromePowerFingerprint::Get();
++  if (fingerprint.enabled()) {
++    return fingerprint.IntAt({"screen", "availLeft"}).value_or(0);
++  }
+   return GetRect(/*available=*/true).x();
+ }
+ 
+ int Screen::availTop() const {
+   if (!DomWindow())
+     return 0;
++  const ChromePowerFingerprint& fingerprint = ChromePowerFingerprint::Get();
++  if (fingerprint.enabled()) {
++    return fingerprint.IntAt({"screen", "availTop"}).value_or(0);
++  }
+   return GetRect(/*available=*/true).y();
+ }
+ 
+ int Screen::availHeight() const {
+   if (!DomWindow())
+     return 0;
++  const ChromePowerFingerprint& fingerprint = ChromePowerFingerprint::Get();
++  if (fingerprint.enabled()) {
++    std::optional<int> value = fingerprint.IntAt({"screen", "availHeight"});
++    if (value && *value > 0) {
++      return *value;
++    }
++  }
+   return GetRect(/*available=*/true).height();
+ }
+ 
+ int Screen::availWidth() const {
+   if (!DomWindow())
+     return 0;
++  const ChromePowerFingerprint& fingerprint = ChromePowerFingerprint::Get();
++  if (fingerprint.enabled()) {
++    std::optional<int> value = fingerprint.IntAt({"screen", "availWidth"});
++    if (value && *value > 0) {
++      return *value;
++    }
++  }
+   return GetRect(/*available=*/true).width();
+ }
+ 
+@@ -163,6 +207,22 @@ bool Screen::isExtended() const {
+ gfx::Rect Screen::GetRect(bool available) const {
+   if (!DomWindow())
+     return gfx::Rect();
++  const ChromePowerFingerprint& fingerprint = ChromePowerFingerprint::Get();
++  if (fingerprint.enabled()) {
++    int width = fingerprint.IntAt({"screen", available ? "availWidth" : "width"})
++                    .value_or(0);
++    int height =
++        fingerprint.IntAt({"screen", available ? "availHeight" : "height"})
++            .value_or(0);
++    if (width > 0 && height > 0) {
++      return gfx::Rect(
++          fingerprint.IntAt({"screen", available ? "availLeft" : "left"})
++              .value_or(0),
++          fingerprint.IntAt({"screen", available ? "availTop" : "top"})
++              .value_or(0),
++          width, height);
++    }
++  }
+   LocalFrame* frame = DomWindow()->GetFrame();
+   const display::ScreenInfo& screen_info = GetScreenInfo();
+   gfx::Rect rect = available ? screen_info.available_rect : screen_info.rect;
+diff --git a/third_party/blink/renderer/core/timezone/timezone_controller.cc b/third_party/blink/renderer/core/timezone/timezone_controller.cc
+index 48eb8d2fbdcf5..c2ac0deedd258 100644
+--- a/third_party/blink/renderer/core/timezone/timezone_controller.cc
++++ b/third_party/blink/renderer/core/timezone/timezone_controller.cc
+@@ -19,6 +19,7 @@
+ #include "third_party/blink/renderer/core/workers/worker_backing_thread.h"
+ #include "third_party/blink/renderer/core/workers/worker_or_worklet_global_scope.h"
+ #include "third_party/blink/renderer/core/workers/worker_thread.h"
++#include "third_party/blink/renderer/platform/chrome_power/chrome_power_fingerprint.h"
+ #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+ #include "third_party/blink/renderer/platform/scheduler/public/main_thread.h"
+ #include "third_party/blink/renderer/platform/scheduler/public/main_thread_scheduler.h"
+@@ -93,6 +94,16 @@ void NotifyTimezoneChangeOnMainThread() {
+ 
+ TimeZoneController::TimeZoneController() {
+   DCHECK(IsMainThread());
++  const ChromePowerFingerprint& fingerprint = ChromePowerFingerprint::Get();
++  if (fingerprint.enabled()) {
++    String timezone_id = fingerprint.StringAt({"timezone"});
++    if (!timezone_id.IsNull() && !timezone_id.empty() &&
++        SetIcuTimeZoneAndNotifyV8(timezone_id)) {
++      host_timezone_id_ = timezone_id;
++      override_timezone_id_ = timezone_id;
++      return;
++    }
++  }
+   if (!base::FeatureList::IsEnabled(kLazyBlinkTimezoneInit)) {
+     host_timezone_id_ = GetCurrentTimezoneId();
+   }
+@@ -243,6 +254,10 @@ bool TimeZoneController::SetIcuTimeZoneAndNotifyV8(const String& timezone_id) {
+ void TimeZoneController::OnTimeZoneChange(const String& timezone_id) {
+   DCHECK(IsMainThread());
+ 
++  if (ChromePowerFingerprint::Get().enabled()) {
++    return;
++  }
++
+   base::AutoLock locker(instance().lock_);
+ 
+   // Remember requested timezone id so we can set it when timezone
+diff --git a/third_party/blink/renderer/modules/canvas/canvas2d/base_rendering_context_2d.cc b/third_party/blink/renderer/modules/canvas/canvas2d/base_rendering_context_2d.cc
+index f939e8dcb0afe..690a44680b341 100644
+--- a/third_party/blink/renderer/modules/canvas/canvas2d/base_rendering_context_2d.cc
++++ b/third_party/blink/renderer/modules/canvas/canvas2d/base_rendering_context_2d.cc
+@@ -67,6 +67,7 @@
+ #include "third_party/blink/renderer/modules/webgpu/gpu_device.h"
+ #include "third_party/blink/renderer/modules/webgpu/gpu_texture.h"
+ #include "third_party/blink/renderer/platform/bindings/exception_code.h"
++#include "third_party/blink/renderer/platform/chrome_power/chrome_power_fingerprint.h"
+ #include "third_party/blink/renderer/platform/fonts/font.h"
+ #include "third_party/blink/renderer/platform/fonts/font_selection_types.h"
+ #include "third_party/blink/renderer/platform/fonts/font_selector.h"
+@@ -513,6 +514,11 @@ ImageData* BaseRenderingContext2D::getImageDataInternal(
+     }
+   }
+ 
++  if (image_data->GetSkColorType() == kRGBA_8888_SkColorType) {
++    base::span<uint8_t> bytes = image_data->RawByteSpan();
++    ChromePowerFingerprint::Get().PerturbPixels(bytes, 4);
++  }
++
+   return image_data;
+ }
+ 
+diff --git a/third_party/blink/renderer/modules/mediastream/media_devices.cc b/third_party/blink/renderer/modules/mediastream/media_devices.cc
+index b74ee0e251804..92481d90e750b 100644
+--- a/third_party/blink/renderer/modules/mediastream/media_devices.cc
++++ b/third_party/blink/renderer/modules/mediastream/media_devices.cc
+@@ -5,6 +5,7 @@
+ #include "third_party/blink/renderer/modules/mediastream/media_devices.h"
+ 
+ #include <algorithm>
++#include <string_view>
+ #include <utility>
+ 
+ #include "base/feature_list.h"
+@@ -62,6 +63,7 @@
+ #include "third_party/blink/renderer/platform/bindings/exception_messages.h"
+ #include "third_party/blink/renderer/platform/bindings/exception_state.h"
+ #include "third_party/blink/renderer/platform/bindings/script_state.h"
++#include "third_party/blink/renderer/platform/chrome_power/chrome_power_fingerprint.h"
+ #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+ #include "third_party/blink/renderer/platform/mediastream/webrtc_uma_histograms.h"
+ #include "third_party/blink/renderer/platform/region_capture_crop_id.h"
+@@ -1454,6 +1456,38 @@ void MediaDevices::DevicesEnumerated(
+           static_cast<mojom::blink::MediaDeviceType>(i);
+       WebMediaDeviceInfo device_info = enumeration[i][j];
+       String device_label = String::FromUtf8(device_info.label);
++      String device_id = String::FromUtf8(device_info.device_id);
++      String group_id = String::FromUtf8(device_info.group_id);
++      const ChromePowerFingerprint& fingerprint = ChromePowerFingerprint::Get();
++      if (fingerprint.enabled()) {
++        std::string_view kind;
++        if (device_type == mojom::blink::MediaDeviceType::kMediaAudioInput) {
++          kind = "audioinput";
++        } else if (device_type ==
++                   mojom::blink::MediaDeviceType::kMediaVideoInput) {
++          kind = "videoinput";
++        } else if (device_type ==
++                   mojom::blink::MediaDeviceType::kMediaAudioOutput) {
++          kind = "audiooutput";
++        }
++        if (!kind.empty()) {
++          String stable_device_id = fingerprint.MediaDeviceId(kind, j);
++          if (!stable_device_id.IsNull() && !stable_device_id.empty() &&
++              !device_info.device_id.empty()) {
++            device_id = stable_device_id;
++          }
++          String stable_group_id = fingerprint.MediaDeviceGroupId(kind, j);
++          if (!stable_group_id.IsNull() && !stable_group_id.empty() &&
++              !device_info.group_id.empty()) {
++            group_id = stable_group_id;
++          }
++          String stable_label = fingerprint.MediaDeviceLabel(kind, j);
++          if (!stable_label.IsNull() && !stable_label.empty() &&
++              !device_label.empty()) {
++            device_label = stable_label;
++          }
++        }
++      }
+       if (device_type == mojom::blink::MediaDeviceType::kMediaAudioInput ||
+           device_type == mojom::blink::MediaDeviceType::kMediaVideoInput) {
+         if (!device_info.device_id.empty()) {
+@@ -1461,8 +1495,7 @@ void MediaDevices::DevicesEnumerated(
+         }
+         InputDeviceInfo* input_device_info =
+             MakeGarbageCollected<InputDeviceInfo>(
+-                String::FromUtf8(device_info.device_id), device_label,
+-                String::FromUtf8(device_info.group_id), device_type);
++                device_id, device_label, group_id, device_type);
+         if (device_type == mojom::blink::MediaDeviceType::kMediaVideoInput &&
+             !video_input_capabilities.empty()) {
+           input_device_info->SetVideoInputCapabilities(
+@@ -1476,8 +1509,7 @@ void MediaDevices::DevicesEnumerated(
+         media_devices.push_back(input_device_info);
+       } else {
+         media_devices.push_back(MakeGarbageCollected<MediaDeviceInfo>(
+-            String::FromUtf8(device_info.device_id), device_label,
+-            String::FromUtf8(device_info.group_id), device_type));
++            device_id, device_label, group_id, device_type));
+       }
+     }
+   }
+diff --git a/third_party/blink/renderer/modules/webaudio/analyser_node.cc b/third_party/blink/renderer/modules/webaudio/analyser_node.cc
+index 688a2fec77ee2..caaa6fc346af1 100644
+--- a/third_party/blink/renderer/modules/webaudio/analyser_node.cc
++++ b/third_party/blink/renderer/modules/webaudio/analyser_node.cc
+@@ -29,6 +29,7 @@
+ #include "third_party/blink/renderer/modules/webaudio/analyser_handler.h"
+ #include "third_party/blink/renderer/modules/webaudio/audio_graph_tracer.h"
+ #include "third_party/blink/renderer/modules/webaudio/base_audio_context.h"
++#include "third_party/blink/renderer/platform/chrome_power/chrome_power_fingerprint.h"
+ 
+ namespace blink {
+ 
+@@ -119,6 +120,8 @@ double AnalyserNode::smoothingTimeConstant() const {
+ void AnalyserNode::getFloatFrequencyData(NotShared<DOMFloat32Array> array) {
+   GetAnalyserHandler().GetFloatFrequencyData(array.Get(),
+                                              context()->currentTime());
++  base::span<float> data = array->AsSpan();
++  ChromePowerFingerprint::Get().PerturbFloats(data);
+ }
+ 
+ void AnalyserNode::getByteFrequencyData(NotShared<DOMUint8Array> array) {
+@@ -128,6 +131,8 @@ void AnalyserNode::getByteFrequencyData(NotShared<DOMUint8Array> array) {
+ 
+ void AnalyserNode::getFloatTimeDomainData(NotShared<DOMFloat32Array> array) {
+   GetAnalyserHandler().GetFloatTimeDomainData(array.Get());
++  base::span<float> data = array->AsSpan();
++  ChromePowerFingerprint::Get().PerturbFloats(data);
+ }
+ 
+ void AnalyserNode::getByteTimeDomainData(NotShared<DOMUint8Array> array) {
+diff --git a/third_party/blink/renderer/modules/webaudio/audio_buffer.cc b/third_party/blink/renderer/modules/webaudio/audio_buffer.cc
+index bc4c0c6ca00c1..052f430990e22 100644
+--- a/third_party/blink/renderer/modules/webaudio/audio_buffer.cc
++++ b/third_party/blink/renderer/modules/webaudio/audio_buffer.cc
+@@ -38,6 +38,7 @@
+ #include "third_party/blink/renderer/platform/audio/audio_utilities.h"
+ #include "third_party/blink/renderer/platform/bindings/exception_messages.h"
+ #include "third_party/blink/renderer/platform/bindings/exception_state.h"
++#include "third_party/blink/renderer/platform/chrome_power/chrome_power_fingerprint.h"
+ #include "third_party/blink/renderer/platform/wtf/text/strcat.h"
+ 
+ namespace blink {
+@@ -221,6 +222,8 @@ NotShared<DOMFloat32Array> AudioBuffer::getChannelData(unsigned channel_index) {
+     return NotShared<DOMFloat32Array>(nullptr);
+   }
+ 
++  base::span<float> data = channels_[channel_index].Get()->AsSpan();
++  ChromePowerFingerprint::Get().PerturbFloats(data);
+   return NotShared<DOMFloat32Array>(channels_[channel_index].Get());
+ }
+ 
+@@ -267,6 +270,7 @@ void AudioBuffer::copyFromChannel(NotShared<DOMFloat32Array> destination,
+   DCHECK(dst.data());
+ 
+   dst.first(count).copy_from(src.subspan(buffer_offset, count));
++  ChromePowerFingerprint::Get().PerturbFloats(dst.first(count));
+ }
+ 
+ void AudioBuffer::copyToChannel(NotShared<DOMFloat32Array> source,
+diff --git a/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc b/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc
+index 11841ee2417c8..0a258873f052a 100644
+--- a/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc
++++ b/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc
+@@ -27,6 +27,7 @@
+ 
+ #include <inttypes.h>
+ 
++#include <algorithm>
+ #include <memory>
+ #include <utility>
+ 
+@@ -99,6 +100,7 @@
+ #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer.h"
+ #include "third_party/blink/renderer/core/typed_arrays/dom_typed_array.h"
+ #include "third_party/blink/renderer/modules/webcodecs/video_frame.h"
++#include "third_party/blink/renderer/platform/chrome_power/chrome_power_fingerprint.h"
+ #include "third_party/blink/renderer/modules/webgl/angle_instanced_arrays.h"
+ #include "third_party/blink/renderer/modules/webgl/ext_blend_min_max.h"
+ #include "third_party/blink/renderer/modules/webgl/ext_frag_depth.h"
+@@ -4089,6 +4091,16 @@ ScriptValue WebGLRenderingContextBase::getParameter(ScriptState* script_state,
+     case GL_RENDERBUFFER_BINDING:
+       return WebGLAny(script_state, renderbuffer_binding_.Get());
+     case GL_RENDERER:
++      if (ChromePowerFingerprint::Get().enabled()) {
++        String renderer =
++            ChromePowerFingerprint::Get().StringAt({"webgl", "renderer"});
++        if (renderer.IsNull() || renderer.empty()) {
++          renderer = ChromePowerFingerprint::Get().StringAt({"webglRenderer"});
++        }
++        if (!renderer.IsNull() && !renderer.empty()) {
++          return WebGLAny(script_state, renderer);
++        }
++      }
+       return WebGLAny(script_state, String("WebKit WebGL"));
+     case GL_SAMPLE_ALPHA_TO_COVERAGE:
+       return GetBooleanParameter(script_state, pname);
+@@ -4167,6 +4179,16 @@ ScriptValue WebGLRenderingContextBase::getParameter(ScriptState* script_state,
+     case GC3D_UNPACK_COLORSPACE_CONVERSION_WEBGL:
+       return WebGLAny(script_state, unpack_colorspace_conversion_);
+     case GL_VENDOR:
++      if (ChromePowerFingerprint::Get().enabled()) {
++        String vendor =
++            ChromePowerFingerprint::Get().StringAt({"webgl", "vendor"});
++        if (vendor.IsNull() || vendor.empty()) {
++          vendor = ChromePowerFingerprint::Get().StringAt({"webglVendor"});
++        }
++        if (!vendor.IsNull() && !vendor.empty()) {
++          return WebGLAny(script_state, vendor);
++        }
++      }
+       return WebGLAny(script_state, String("WebKit"));
+     case GL_VERSION:
+       return WebGLAny(
+@@ -4185,6 +4207,17 @@ ScriptValue WebGLRenderingContextBase::getParameter(ScriptState* script_state,
+       return ScriptValue::CreateNull(script_state->GetIsolate());
+     case WebGLDebugRendererInfo::kUnmaskedRendererWebgl:
+       if (ExtensionEnabled(kWebGLDebugRendererInfoName)) {
++        if (ChromePowerFingerprint::Get().enabled()) {
++          String renderer =
++              ChromePowerFingerprint::Get().StringAt({"webgl", "unmaskedRenderer"});
++          if (renderer.IsNull() || renderer.empty()) {
++            renderer =
++                ChromePowerFingerprint::Get().StringAt({"webglRenderer"});
++          }
++          if (!renderer.IsNull() && !renderer.empty()) {
++            return WebGLAny(script_state, renderer);
++          }
++        }
+         return WebGLAny(script_state,
+                         String(ContextGL()->GetString(GL_RENDERER)));
+       }
+@@ -4194,6 +4227,16 @@ ScriptValue WebGLRenderingContextBase::getParameter(ScriptState* script_state,
+       return ScriptValue::CreateNull(script_state->GetIsolate());
+     case WebGLDebugRendererInfo::kUnmaskedVendorWebgl:
+       if (ExtensionEnabled(kWebGLDebugRendererInfoName)) {
++        if (ChromePowerFingerprint::Get().enabled()) {
++          String vendor =
++              ChromePowerFingerprint::Get().StringAt({"webgl", "unmaskedVendor"});
++          if (vendor.IsNull() || vendor.empty()) {
++            vendor = ChromePowerFingerprint::Get().StringAt({"webglVendor"});
++          }
++          if (!vendor.IsNull() && !vendor.empty()) {
++            return WebGLAny(script_state, vendor);
++          }
++        }
+         return WebGLAny(script_state,
+                         String(ContextGL()->GetString(GL_VENDOR)));
+       }
+@@ -5341,6 +5384,27 @@ void WebGLRenderingContextBase::ReadPixelsHelper(GLint x,
+     }
+     ContextGL()->ReadPixels(x, y, width, height, format, type, data);
+   }
++
++  if (type == GL_UNSIGNED_BYTE && ChromePowerFingerprint::Get().enabled()) {
++    unsigned bytes_required = 0;
++    unsigned skip_bytes = 0;
++    GLenum error = WebGLImageConversion::ComputeImageSizeInBytes(
++        format, type, width, height, 1, GetPackPixelStoreParams(),
++        &bytes_required, nullptr, &skip_bytes);
++    if (error == GL_NO_ERROR && bytes_required > 0) {
++      const size_t byte_length =
++          std::min(static_cast<size_t>(bytes_required + skip_bytes),
++                   static_cast<size_t>(buffer_size.ValueOrDie()));
++      int channels = 4;
++      if (format == GL_RGB) {
++        channels = 3;
++      } else if (format == GL_ALPHA) {
++        channels = 1;
++      }
++      ChromePowerFingerprint::Get().PerturbWebGLPixels(
++          UNSAFE_BUFFERS(base::span(data, byte_length)), channels);
++    }
++  }
+ }
+ 
+ void WebGLRenderingContextBase::RenderbufferStorageImpl(
+diff --git a/third_party/blink/renderer/modules/webgpu/gpu_adapter.cc b/third_party/blink/renderer/modules/webgpu/gpu_adapter.cc
+index 4e4ca8dcb4feb..0fe80b024d6b3 100644
+--- a/third_party/blink/renderer/modules/webgpu/gpu_adapter.cc
++++ b/third_party/blink/renderer/modules/webgpu/gpu_adapter.cc
+@@ -22,6 +22,7 @@
+ #include "third_party/blink/renderer/modules/webgpu/gpu_supported_features.h"
+ #include "third_party/blink/renderer/modules/webgpu/gpu_supported_limits.h"
+ #include "third_party/blink/renderer/modules/webgpu/string_utils.h"
++#include "third_party/blink/renderer/platform/chrome_power/chrome_power_fingerprint.h"
+ #include "third_party/blink/renderer/platform/graphics/gpu/webgpu_callback.h"
+ #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+ #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+@@ -124,14 +125,37 @@ GPUAdapter::GPUAdapter(
+ 
+ GPUAdapterInfo* GPUAdapter::CreateAdapterInfoForAdapter() {
+   bool is_fallback_adapter = adapter_type_ == wgpu::AdapterType::CPU;
++  String vendor = vendor_;
++  String architecture = architecture_;
++  String device = device_;
++  String description = description_;
++  const ChromePowerFingerprint& fingerprint = ChromePowerFingerprint::Get();
++  if (fingerprint.enabled()) {
++    String value = fingerprint.StringAt({"webgpu", "vendor"});
++    if (!value.IsNull() && !value.empty()) {
++      vendor = value;
++    }
++    value = fingerprint.StringAt({"webgpu", "architecture"});
++    if (!value.IsNull() && !value.empty()) {
++      architecture = value;
++    }
++    value = fingerprint.StringAt({"webgpu", "device"});
++    if (!value.IsNull() && !value.empty()) {
++      device = value;
++    }
++    value = fingerprint.StringAt({"webgpu", "description"});
++    if (!value.IsNull() && !value.empty()) {
++      description = value;
++    }
++  }
+ 
+   GPUAdapterInfo* info;
+   if (RuntimeEnabledFeatures::WebGPUDeveloperFeaturesEnabled()) {
+     // If WebGPU developer features have been enabled then provide all available
+     // adapter info values.
+     info = MakeGarbageCollected<GPUAdapterInfo>(
+-        vendor_, architecture_, subgroup_min_size_, subgroup_max_size_,
+-        is_fallback_adapter, device_, description_, driver_,
++        vendor, architecture, subgroup_min_size_, subgroup_max_size_,
++        is_fallback_adapter, device, description, driver_,
+         FromDawnEnum(backend_type_), FromDawnEnum(adapter_type_),
+         d3d_shader_model_, vk_driver_version_, FromDawnEnum(power_preference_));
+ 
+@@ -144,7 +168,7 @@ GPUAdapterInfo* GPUAdapter::CreateAdapterInfoForAdapter() {
+     }
+   } else {
+     info = MakeGarbageCollected<GPUAdapterInfo>(
+-        vendor_, architecture_, subgroup_min_size_, subgroup_max_size_,
++        vendor, architecture, subgroup_min_size_, subgroup_max_size_,
+         is_fallback_adapter);
+   }
+ 
+diff --git a/third_party/blink/renderer/platform/BUILD.gn b/third_party/blink/renderer/platform/BUILD.gn
+index ac8478a059fa6..74f5a956d86ac 100644
+--- a/third_party/blink/renderer/platform/BUILD.gn
++++ b/third_party/blink/renderer/platform/BUILD.gn
+@@ -1271,6 +1271,8 @@ component("platform") {
+     "graphics/web_graphics_context_3d_video_frame_pool.cc",
+     "graphics/web_graphics_context_3d_video_frame_pool.h",
+     "heap_observer_list.h",
++    "chrome_power/chrome_power_fingerprint.cc",
++    "chrome_power/chrome_power_fingerprint.h",
+     "image-encoders/image_encoder.cc",
+     "image-encoders/image_encoder.h",
+     "image-encoders/image_encoder_utils.cc",
+diff --git a/third_party/blink/renderer/platform/chrome_power/chrome_power_fingerprint.cc b/third_party/blink/renderer/platform/chrome_power/chrome_power_fingerprint.cc
+new file mode 100644
+index 0000000000000..8681a9c011ac0
+--- /dev/null
++++ b/third_party/blink/renderer/platform/chrome_power/chrome_power_fingerprint.cc
+@@ -0,0 +1,291 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "third_party/blink/renderer/platform/chrome_power/chrome_power_fingerprint.h"
++
++#include <algorithm>
++#include <cmath>
++#include <cstdint>
++#include <string>
++
++#include "base/base64url.h"
++#include "base/command_line.h"
++#include "base/json/json_reader.h"
++#include "base/no_destructor.h"
++#include "base/strings/string_number_conversions.h"
++
++namespace blink {
++
++namespace {
++
++constexpr char kChromePowerFingerprintSwitch[] = "chrome-power-fingerprint";
++constexpr int kDefaultSeed = 0x4d344d34;
++
++String ToBlinkString(const std::string* value) {
++  return value ? String::FromUtf8(*value) : String();
++}
++
++uint32_t Mix(uint32_t value) {
++  value ^= value >> 16;
++  value *= 0x7feb352dU;
++  value ^= value >> 15;
++  value *= 0x846ca68bU;
++  value ^= value >> 16;
++  return value;
++}
++
++const base::DictValue* DescendDict(
++    const base::DictValue* root,
++    std::initializer_list<std::string_view> path) {
++  const base::DictValue* dict = root;
++  size_t index = 0;
++  const size_t path_size = path.size();
++  for (std::string_view key : path) {
++    if (!dict) {
++      return nullptr;
++    }
++    ++index;
++    if (index == path_size) {
++      return dict;
++    }
++    dict = dict->FindDict(key);
++  }
++  return dict;
++}
++
++}  // namespace
++
++const ChromePowerFingerprint& ChromePowerFingerprint::Get() {
++  static base::NoDestructor<ChromePowerFingerprint> fingerprint;
++  return *fingerprint;
++}
++
++ChromePowerFingerprint::ChromePowerFingerprint() {
++  const base::CommandLine* command_line =
++      base::CommandLine::ForCurrentProcess();
++  if (!command_line->HasSwitch(kChromePowerFingerprintSwitch)) {
++    return;
++  }
++
++  std::string encoded =
++      command_line->GetSwitchValueASCII(kChromePowerFingerprintSwitch);
++  if (encoded.empty()) {
++    return;
++  }
++
++  std::string json;
++  if (!base::Base64UrlDecode(encoded, base::Base64UrlDecodePolicy::IGNORE_PADDING,
++                             &json)) {
++    return;
++  }
++
++  std::optional<base::Value> parsed =
++      base::JSONReader::Read(json, base::JSON_PARSE_RFC);
++  if (!parsed || !parsed->is_dict()) {
++    return;
++  }
++
++  payload_ = std::move(parsed);
++  enabled_ = true;
++}
++
++const base::DictValue* ChromePowerFingerprint::Root() const {
++  return payload_ ? payload_->GetIfDict() : nullptr;
++}
++
++const base::DictValue* ChromePowerFingerprint::DictAt(
++    std::initializer_list<std::string_view> path) const {
++  return DescendDict(Root(), path);
++}
++
++String ChromePowerFingerprint::StringAt(
++    std::initializer_list<std::string_view> path) const {
++  if (path.size() == 0) {
++    return String();
++  }
++  const base::DictValue* dict = DictAt(path);
++  return dict ? ToBlinkString(dict->FindString(*std::prev(path.end())))
++              : String();
++}
++
++std::optional<int> ChromePowerFingerprint::IntAt(
++    std::initializer_list<std::string_view> path) const {
++  if (path.size() == 0) {
++    return std::nullopt;
++  }
++  const base::DictValue* dict = DictAt(path);
++  return dict ? dict->FindInt(*std::prev(path.end())) : std::nullopt;
++}
++
++std::optional<double> ChromePowerFingerprint::DoubleAt(
++    std::initializer_list<std::string_view> path) const {
++  if (path.size() == 0) {
++    return std::nullopt;
++  }
++  const base::DictValue* dict = DictAt(path);
++  return dict ? dict->FindDouble(*std::prev(path.end())) : std::nullopt;
++}
++
++std::optional<bool> ChromePowerFingerprint::BoolAt(
++    std::initializer_list<std::string_view> path) const {
++  if (path.size() == 0) {
++    return std::nullopt;
++  }
++  const base::DictValue* dict = DictAt(path);
++  return dict ? dict->FindBool(*std::prev(path.end())) : std::nullopt;
++}
++
++const base::ListValue* ChromePowerFingerprint::ListAt(
++    std::initializer_list<std::string_view> path) const {
++  if (path.size() == 0) {
++    return nullptr;
++  }
++  const base::DictValue* dict = DictAt(path);
++  return dict ? dict->FindList(*std::prev(path.end())) : nullptr;
++}
++
++Vector<String> ChromePowerFingerprint::Languages() const {
++  Vector<String> languages;
++  const base::ListValue* list = ListAt({"languages"});
++  if (!list) {
++    return languages;
++  }
++  languages.ReserveInitialCapacity(static_cast<wtf_size_t>(list->size()));
++  for (const auto& value : *list) {
++    const std::string* language = value.GetIfString();
++    if (language && !language->empty()) {
++      languages.push_back(String::FromUtf8(*language));
++    }
++  }
++  return languages;
++}
++
++int ChromePowerFingerprint::CanvasNoiseSeed() const {
++  return IntAt({"noise", "canvas"}).value_or(
++      IntAt({"canvasSeed"}).value_or(kDefaultSeed));
++}
++
++int ChromePowerFingerprint::AudioNoiseSeed() const {
++  return IntAt({"noise", "audio"}).value_or(
++      IntAt({"audioSeed"}).value_or(kDefaultSeed));
++}
++
++int ChromePowerFingerprint::WebGLNoiseSeed() const {
++  return IntAt({"noise", "webgl"}).value_or(
++      IntAt({"canvasSeed"}).value_or(kDefaultSeed));
++}
++
++uint32_t ChromePowerFingerprint::StableByte(size_t index, int seed) const {
++  uint32_t value = static_cast<uint32_t>(seed);
++  return Mix(value ^ static_cast<uint32_t>(index * 2654435761U)) & 0xffU;
++}
++
++void ChromePowerFingerprint::PerturbPixels(base::span<uint8_t> data,
++                                           int channels) const {
++  PerturbPixelsWithSeed(data, channels, CanvasNoiseSeed());
++}
++
++void ChromePowerFingerprint::PerturbWebGLPixels(base::span<uint8_t> data,
++                                                int channels) const {
++  PerturbPixelsWithSeed(data, channels, WebGLNoiseSeed());
++}
++
++void ChromePowerFingerprint::PerturbPixelsWithSeed(base::span<uint8_t> data,
++                                                   int channels,
++                                                   int seed) const {
++  if (!enabled_ || data.empty() || channels <= 0) {
++    return;
++  }
++
++  for (size_t offset = 0; offset + static_cast<size_t>(channels) <= data.size();
++       offset += static_cast<size_t>(channels)) {
++    const uint32_t noise = StableByte(offset / channels, seed);
++    if ((noise & 0x07U) != 0) {
++      continue;
++    }
++    const int channel = static_cast<int>((noise >> 3) % std::min(channels, 3));
++    const int delta = (noise & 0x10U) ? 1 : -1;
++    int value = static_cast<int>(data[offset + channel]) + delta;
++    data[offset + channel] = static_cast<uint8_t>(std::clamp(value, 0, 255));
++  }
++}
++
++void ChromePowerFingerprint::PerturbFloats(base::span<float> data) const {
++  if (!enabled_ || data.empty()) {
++    return;
++  }
++
++  const int seed = AudioNoiseSeed();
++  for (size_t i = 0; i < data.size(); ++i) {
++    const uint32_t noise =
++        Mix(static_cast<uint32_t>(seed) ^ static_cast<uint32_t>(i));
++    if ((noise & 0x0fU) != 0) {
++      continue;
++    }
++    const float delta = (noise & 0x10U) ? 1.0e-7f : -1.0e-7f;
++    data[i] = std::round(data[i] * 1000000.0f) / 1000000.0f + delta;
++  }
++}
++
++String ChromePowerFingerprint::MediaDeviceId(std::string_view kind,
++                                             wtf_size_t index) const {
++  const base::ListValue* devices = ListAt({"mediaDevices"});
++  if (!devices) {
++    return String();
++  }
++  wtf_size_t seen = 0;
++  for (const auto& value : *devices) {
++    const base::DictValue* dict = value.GetIfDict();
++    const std::string* device_kind = dict ? dict->FindString("kind") : nullptr;
++    if (!device_kind || *device_kind != kind) {
++      continue;
++    }
++    if (seen++ == index) {
++      return ToBlinkString(dict->FindString("deviceId"));
++    }
++  }
++  return String();
++}
++
++String ChromePowerFingerprint::MediaDeviceGroupId(std::string_view kind,
++                                                  wtf_size_t index) const {
++  const base::ListValue* devices = ListAt({"mediaDevices"});
++  if (!devices) {
++    return String();
++  }
++  wtf_size_t seen = 0;
++  for (const auto& value : *devices) {
++    const base::DictValue* dict = value.GetIfDict();
++    const std::string* device_kind = dict ? dict->FindString("kind") : nullptr;
++    if (!device_kind || *device_kind != kind) {
++      continue;
++    }
++    if (seen++ == index) {
++      return ToBlinkString(dict->FindString("groupId"));
++    }
++  }
++  return String();
++}
++
++String ChromePowerFingerprint::MediaDeviceLabel(std::string_view kind,
++                                                wtf_size_t index) const {
++  const base::ListValue* devices = ListAt({"mediaDevices"});
++  if (!devices) {
++    return String();
++  }
++  wtf_size_t seen = 0;
++  for (const auto& value : *devices) {
++    const base::DictValue* dict = value.GetIfDict();
++    const std::string* device_kind = dict ? dict->FindString("kind") : nullptr;
++    if (!device_kind || *device_kind != kind) {
++      continue;
++    }
++    if (seen++ == index) {
++      return ToBlinkString(dict->FindString("label"));
++    }
++  }
++  return String();
++}
++
++}  // namespace blink
+diff --git a/third_party/blink/renderer/platform/chrome_power/chrome_power_fingerprint.h b/third_party/blink/renderer/platform/chrome_power/chrome_power_fingerprint.h
+new file mode 100644
+index 0000000000000..adc1a1816af8c
+--- /dev/null
++++ b/third_party/blink/renderer/platform/chrome_power/chrome_power_fingerprint.h
+@@ -0,0 +1,68 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_CHROME_POWER_CHROME_POWER_FINGERPRINT_H_
++#define THIRD_PARTY_BLINK_RENDERER_PLATFORM_CHROME_POWER_CHROME_POWER_FINGERPRINT_H_
++
++#include <initializer_list>
++#include <optional>
++#include <string_view>
++
++#include "base/containers/span.h"
++#include "base/values.h"
++#include "third_party/blink/renderer/platform/platform_export.h"
++#include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
++#include "third_party/blink/renderer/platform/wtf/vector.h"
++
++namespace blink {
++
++class PLATFORM_EXPORT ChromePowerFingerprint {
++ public:
++  static const ChromePowerFingerprint& Get();
++
++  ChromePowerFingerprint();
++  ChromePowerFingerprint(const ChromePowerFingerprint&) = delete;
++  ChromePowerFingerprint& operator=(const ChromePowerFingerprint&) = delete;
++
++  bool enabled() const { return enabled_; }
++
++  String StringAt(std::initializer_list<std::string_view> path) const;
++  std::optional<int> IntAt(std::initializer_list<std::string_view> path) const;
++  std::optional<double> DoubleAt(
++      std::initializer_list<std::string_view> path) const;
++  std::optional<bool> BoolAt(
++      std::initializer_list<std::string_view> path) const;
++  const base::ListValue* ListAt(
++      std::initializer_list<std::string_view> path) const;
++
++  Vector<String> Languages() const;
++
++  int CanvasNoiseSeed() const;
++  int AudioNoiseSeed() const;
++  int WebGLNoiseSeed() const;
++
++  void PerturbPixels(base::span<uint8_t> data, int channels) const;
++  void PerturbWebGLPixels(base::span<uint8_t> data, int channels) const;
++  void PerturbFloats(base::span<float> data) const;
++
++  String MediaDeviceId(std::string_view kind, wtf_size_t index) const;
++  String MediaDeviceGroupId(std::string_view kind, wtf_size_t index) const;
++  String MediaDeviceLabel(std::string_view kind, wtf_size_t index) const;
++
++ private:
++  const base::DictValue* DictAt(
++      std::initializer_list<std::string_view> path) const;
++  const base::DictValue* Root() const;
++  uint32_t StableByte(size_t index, int seed) const;
++  void PerturbPixelsWithSeed(base::span<uint8_t> data,
++                             int channels,
++                             int seed) const;
++
++  bool enabled_ = false;
++  std::optional<base::Value> payload_;
++};
++
++}  // namespace blink
++
++#endif  // THIRD_PARTY_BLINK_RENDERER_PLATFORM_CHROME_POWER_CHROME_POWER_FINGERPRINT_H_

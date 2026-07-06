@@ -14,6 +14,8 @@ import puppeteer from 'puppeteer';
 import {presetCookie} from '../puppeteer/helpers';
 import {ExtensionDB} from '../db/extension';
 import * as ExcelJS from 'exceljs';
+import {parseFingerprintSnapshot} from '../fingerprint/snapshot';
+import {runFingerprintDiagnostics} from '../fingerprint/diagnostics';
 const logger = createLogger(SERVICE_LOGGER_LABEL);
 export const initWindowService = () => {
   logger.info('init window service...');
@@ -99,13 +101,19 @@ export const initWindowService = () => {
     if (windowId) {
       const window = await WindowDB.getById(windowId);
       if (window) {
-        return {
-          ...JSON.parse(window.fingerprint),
-        };
+        return parseFingerprintSnapshot(window.fingerprint) || {};
       }
     } else {
       return {};
     }
+  });
+
+  ipcMain.handle('window-fingerprint-diagnostics', async (_, windowId: number) => {
+    const window = await WindowDB.getById(windowId);
+    if (!window) {
+      throw new Error(`Window ${windowId} not found`);
+    }
+    return await runFingerprintDiagnostics(window);
   });
 
   ipcMain.handle('window-getById', async (_, id: number) => {

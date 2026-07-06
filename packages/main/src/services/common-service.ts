@@ -8,6 +8,7 @@ import {getSettings} from '../utils/get-settings';
 import {getOrigin} from '../server';
 import axios from 'axios';
 import {writeFile} from 'fs/promises';
+import {getManagedBrowserCoreStatus} from '../browser-core/managed-core';
 
 
 const logger = createLogger(SERVICE_LOGGER_LABEL);
@@ -50,6 +51,14 @@ export const initCommonService = () => {
     const settings = getSettings();
 
     return settings;
+  });
+
+  ipcMain.handle('common-managed-browser-status', async () => {
+    const settings = getSettings();
+    return getManagedBrowserCoreStatus({
+      rootPath: settings.managedBrowserRoot,
+      manifestPath: settings.managedBrowserManifestPath,
+    });
   });
 
   ipcMain.handle(
@@ -103,6 +112,8 @@ export const initCommonService = () => {
     if (values.localChromePath === '/Applications/Google Chrome.app') {
       values.localChromePath = values.localChromePath + '/Contents/MacOS/Google Chrome';
     }
+    values.browserMode = values.browserMode === 'local' ? 'local' : 'managed';
+    values.useLocalChrome = values.browserMode === 'local';
     const configFilePath = CONFIG_FILE_PATH;
 
     try {

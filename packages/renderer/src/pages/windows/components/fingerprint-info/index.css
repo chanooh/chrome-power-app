@@ -1,18 +1,47 @@
 .fingerprint-wrapper {
   height: 100%;
-  min-width: 300px;
-  max-width: 400px;
+  min-width: 340px;
+  max-width: 460px;
   padding: 12px 18px;
   border-radius: 8px;
   flex: 1 1 auto;
   position: sticky;
   top: 0;
-  background-color: rgba(64, 150, 255, 0.1);
+  background-color: rgba(64, 150, 255, 0.08);
+}
+
+.fingerprint-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
 }
 
 .fingerprint-value {
-  max-width: 150px;
+  max-width: 240px;
   margin-inline-start: auto;
   word-break: break-word;
   text-align: end;
+}
+
+.fingerprint-title {
+  min-width: 104px;
+}
+
+.fingerprint-diagnostics {
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid rgba(5, 5, 5, 0.08);
+}
+
+.fingerprint-diagnostic-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.fingerprint-diagnostic-label {
+  flex: 1;
 }

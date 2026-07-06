@@ -125,7 +125,10 @@ const WindowDetail = () => {
               formValue={formValue}
               formChangeCallback={formValueChangeCallback}
             ></WindowEditForm>
-            <FingerprintInfo fingerprints={fingerprints} />
+            <FingerprintInfo
+              fingerprints={fingerprints}
+              windowId={formValue.id}
+            />
           </div>
         ) : (
           <WindowDetailTabs

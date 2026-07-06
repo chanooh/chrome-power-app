@@ -1,11 +1,15 @@
-import {Button, Card, Form, Input, Space} from 'antd';
+import {Alert, Button, Card, Form, Input, Select, Space, Tag} from 'antd';
 import {CommonBridge} from '#preload';
 import {useEffect, useState} from 'react';
-import type {SettingOptions} from '../../../../shared/types/common';
+import type {ManagedBrowserCoreStatus, SettingOptions} from '../../../../shared/types/common';
 import {useTranslation} from 'react-i18next';
 
 type FieldType = {
   profileCachePath: string;
+  browserMode: 'managed' | 'local';
+  managedBrowserRoot: string;
+  managedBrowserVersion: string;
+  managedBrowserManifestPath: string;
   useLocalChrome: boolean;
   localChromePath: string;
   chromiumBinPath: string;
@@ -15,11 +19,16 @@ type FieldType = {
 const Settings = () => {
   const [formValue, setFormValue] = useState<SettingOptions>({
     profileCachePath: '',
-    useLocalChrome: true,
+    browserMode: 'managed',
+    managedBrowserRoot: '',
+    managedBrowserVersion: '',
+    managedBrowserManifestPath: '',
+    useLocalChrome: false,
     localChromePath: '',
     chromiumBinPath: '',
     automationConnect: false,
   });
+  const [managedBrowserStatus, setManagedBrowserStatus] = useState<ManagedBrowserCoreStatus | null>(null);
   const [form] = Form.useForm();
   const {t} = useTranslation();
 
@@ -31,6 +40,8 @@ const Settings = () => {
     const settings = await CommonBridge.getSettings();
     setFormValue(settings);
     form.setFieldsValue(settings);
+    const status = await CommonBridge.getManagedBrowserStatus();
+    setManagedBrowserStatus(status);
   };
 
   const handleSave = async (values: SettingOptions) => {
@@ -50,10 +61,13 @@ const Settings = () => {
     }
   };
 
-  const handleFormValueChange = (changed: SettingOptions) => {
+  const handleFormValueChange = (changed: Partial<SettingOptions>) => {
+    const browserMode = changed.browserMode || formValue.browserMode;
     const newFormValue = {
       ...formValue,
       ...changed,
+      browserMode,
+      useLocalChrome: browserMode === 'local',
     };
     setFormValue(newFormValue);
     handleSave(newFormValue);
@@ -94,13 +108,68 @@ const Settings = () => {
               </Button>
             </Space.Compact>
           </Form.Item>
-          {/* <Form.Item<FieldType>
-            label={t('settings_use_local_chrome')}
-            name="useLocalChrome"
+          <Form.Item<FieldType>
+            label={t('settings_browser_mode')}
+            name="browserMode"
           >
-            <Switch value={formValue.useLocalChrome} />
-          </Form.Item> */}
-          {formValue.useLocalChrome ? (
+            <Select
+              value={formValue.browserMode}
+              options={[
+                {label: t('settings_browser_mode_managed'), value: 'managed'},
+                {label: t('settings_browser_mode_local'), value: 'local'},
+              ]}
+            />
+          </Form.Item>
+          {formValue.browserMode === 'managed' ? (
+            <>
+              <Form.Item<FieldType>
+                label={t('settings_managed_browser_version')}
+                name="managedBrowserVersion"
+              >
+                <Input
+                  readOnly
+                  disabled
+                  value={formValue.managedBrowserVersion}
+                />
+              </Form.Item>
+              <Form.Item<FieldType>
+                label={t('settings_managed_browser_root')}
+                name="managedBrowserRoot"
+              >
+                <Input
+                  readOnly
+                  disabled
+                  value={formValue.managedBrowserRoot}
+                />
+              </Form.Item>
+              <Form.Item<FieldType>
+                label={t('settings_managed_browser_manifest')}
+                name="managedBrowserManifestPath"
+              >
+                <Input
+                  readOnly
+                  disabled
+                  value={formValue.managedBrowserManifestPath}
+                />
+              </Form.Item>
+              <Form.Item label={t('settings_managed_browser_status')}>
+                <Space direction="vertical" style={{width: '100%'}}>
+                  <Tag color={managedBrowserStatus?.available ? 'green' : 'red'}>
+                    {managedBrowserStatus?.available
+                      ? t('settings_managed_browser_ready')
+                      : t('settings_managed_browser_missing')}
+                  </Tag>
+                  {managedBrowserStatus?.message ? (
+                    <Alert
+                      type={managedBrowserStatus.available ? 'success' : 'warning'}
+                      message={managedBrowserStatus.message}
+                      showIcon
+                    />
+                  ) : null}
+                </Space>
+              </Form.Item>
+            </>
+          ) : (
             <Form.Item<FieldType>
               label={t('settings_chrome_path')}
               name="localChromePath"
@@ -114,25 +183,6 @@ const Settings = () => {
                 <Button
                   type="default"
                   onClick={() => handleChoosePath('localChromePath', 'openFile')}
-                >
-                  {t('settings_choose_cache_path')}
-                </Button>
-              </Space.Compact>
-            </Form.Item>
-          ) : (
-            <Form.Item<FieldType>
-              label={t('setting_chromium_path')}
-              name="chromiumBinPath"
-            >
-              <Space.Compact style={{width: '100%'}}>
-                <Input
-                  readOnly
-                  disabled
-                  value={formValue.chromiumBinPath}
-                />
-                <Button
-                  type="default"
-                  onClick={() => handleChoosePath('chromiumBinPath', 'openFile')}
                 >
                   {t('settings_choose_cache_path')}
                 </Button>

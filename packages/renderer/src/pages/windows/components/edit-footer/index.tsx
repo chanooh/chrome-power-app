@@ -61,7 +61,10 @@ const WindowDetailFooter = ({
       showMessage(result);
     } else {
       if (currentTab === 'windowForm') {
-        result = await WindowBridge?.create(formValue, fingerprints);
+        result = await WindowBridge?.create(formValue, {
+          ...fingerprints,
+          templateId: formValue.fingerprint_template_id || fingerprints?.requestedTemplateId || 'auto',
+        });
         showMessage(result);
       }
     }

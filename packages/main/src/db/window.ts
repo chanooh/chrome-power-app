@@ -3,6 +3,11 @@ import type {DB, SafeAny} from '../../../shared/types/db';
 import type {IWindowTemplate} from '../types/window-template';
 import {GroupDB} from './group';
 import {randomUniqueProfileId} from '../../../shared/utils/random';
+import {
+  generateFingerprintSnapshot,
+  parseFingerprintSnapshot,
+  serializeFingerprintSnapshot,
+} from '../fingerprint/snapshot';
 
 const all = async () => {
   return await db('window')
@@ -138,6 +143,7 @@ const update = async (id: number, updatedData: DB.Window) => {
   delete updatedData.ip_checker;
   delete updatedData.ip;
   delete updatedData.tags_name;
+  delete updatedData.fingerprint_template_id;
   if (updatedData.group_id === undefined) {
     updatedData.group_id = null;
   }
@@ -160,6 +166,13 @@ const update = async (id: number, updatedData: DB.Window) => {
   }
 };
 
+const getRequestedTemplateId = (windowData: DB.Window, fingerprint?: SafeAny) => {
+  if (fingerprint && typeof fingerprint === 'object') {
+    return fingerprint.templateId || fingerprint.requestedTemplateId;
+  }
+  return windowData.fingerprint_template_id;
+};
+
 const create = async (windowData: DB.Window, fingerprint?: SafeAny) => {
   if (windowData.id && typeof windowData.id === 'string') {
     windowData.profile_id = windowData.id;
@@ -172,15 +185,18 @@ const create = async (windowData: DB.Window, fingerprint?: SafeAny) => {
       windowData.profile_id = randomUniqueProfileId();
     }
   }
-  if (fingerprint) {
-    windowData.ua = fingerprint.ua;
-    windowData.fingerprint = JSON.stringify(fingerprint);
-  }
-  // else {
-  //   const randFingerprint = randomFingerprint();
-  //   windowData.ua = randFingerprint.ua;
-  //   windowData.fingerprint = JSON.stringify(randFingerprint);
-  // }
+  const existingSnapshot = parseFingerprintSnapshot(fingerprint);
+  const snapshot =
+    existingSnapshot?.profileId === windowData.profile_id
+      ? existingSnapshot
+      : generateFingerprintSnapshot(
+          windowData.profile_id!,
+          getRequestedTemplateId(windowData, fingerprint),
+        );
+  windowData.ua = snapshot.ua;
+  windowData.fingerprint = serializeFingerprintSnapshot(snapshot);
+  delete windowData.fingerprint_template_id;
+
   const [id] = await db('window').insert(windowData);
   return {
     success: true,
@@ -190,6 +206,28 @@ const create = async (windowData: DB.Window, fingerprint?: SafeAny) => {
       id,
     },
   };
+};
+
+const ensureFingerprintSnapshot = async (id: number, windowData?: DB.Window) => {
+  const currentWindow = windowData || (await getById(id));
+  const existingSnapshot = parseFingerprintSnapshot(currentWindow?.fingerprint);
+  if (existingSnapshot) {
+    return existingSnapshot;
+  }
+  if (!currentWindow?.profile_id) {
+    throw new Error(`Window ${id} does not have a profile_id`);
+  }
+
+  const snapshot = generateFingerprintSnapshot(
+    currentWindow.profile_id,
+    currentWindow.fingerprint_template_id,
+  );
+  await update(id, {
+    ...currentWindow,
+    ua: snapshot.ua,
+    fingerprint: serializeFingerprintSnapshot(snapshot),
+  });
+  return snapshot;
 };
 
 const remove = async (id: number) => {
@@ -277,6 +315,7 @@ export const WindowDB = {
   getOpenedWindows,
   update,
   create,
+  ensureFingerprintSnapshot,
   remove,
   deleteAll,
   batchRemove,
