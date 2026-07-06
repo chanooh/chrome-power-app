@@ -1,5 +1,6 @@
 // types/models.d.ts
 import type {MacDeviceTemplateId} from './fingerprint';
+import type {ExtensionSourceType} from './extension';
 
 export namespace DB {
   export interface Window {
@@ -71,6 +72,18 @@ export namespace DB {
     name: string;
     version: string;
     path: string;
+    extension_uid?: string;
+    source_type?: ExtensionSourceType;
+    manifest_version?: number;
+    sha256?: string;
+    permissions?: string[] | string | null;
+    host_permissions?: string[] | string | null;
+    repository_path?: string;
+    current_path?: string;
+    update_url_removed?: boolean | number;
+    last_verified_at?: string;
+    imported_at?: string;
+    usageCount?: number;
     windows?: number[] | string;
     icon?: string;
     description?: string;

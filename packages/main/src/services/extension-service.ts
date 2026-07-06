@@ -1,12 +1,12 @@
 import {ipcMain} from 'electron';
 import type {DB} from '../../../shared/types/db';
 import {ExtensionDB} from '../db/extension';
-import {copyFileSync, mkdirSync, existsSync, readFileSync, unlinkSync, rmdirSync} from 'fs';
-import extract from 'extract-zip';
-import {join} from 'path';
-import {ensureProfileCachePath, getSettings} from '../utils/get-settings';
 import {db} from '../db';
-import {readdir, rename} from 'fs/promises';
+import {
+  importExtensionToRepository,
+  verifyExtensionRepository,
+} from '../extensions/repository';
+import {existsSync, rmSync} from 'fs';
 
 export const initExtensionService = () => {
   ipcMain.handle('extension-create', async (_, extension: DB.Extension) => {
@@ -39,7 +39,12 @@ export const initExtensionService = () => {
   );
 
   ipcMain.handle('extension-delete', async (_, extensionId: number) => {
-    return await ExtensionDB.deleteExtension(extensionId);
+    const extension = await ExtensionDB.getExtensionById(extensionId);
+    const result = await ExtensionDB.deleteExtension(extensionId);
+    if (typeof result === 'number' && result > 0 && extension?.repository_path && existsSync(extension.repository_path)) {
+      rmSync(extension.repository_path, {recursive: true, force: true});
+    }
+    return result;
   });
 
   ipcMain.handle(
@@ -49,84 +54,72 @@ export const initExtensionService = () => {
     },
   );
 
-  // 添加处理上传文件的方法
-  ipcMain.handle(
-    'extension-upload-package',
-    async (_, filePath: string, existingExtensionId?: number) => {
-      try {
-        const settings = getSettings();
-        ensureProfileCachePath(settings.profileCachePath);
-        // 获取应用数据目录
-        const extensionsPath = join(settings.profileCachePath, 'extensions');
+  const uploadPackage = async (filePath: string, existingExtensionId?: number) => {
+    try {
+      const existingExtension = existingExtensionId
+        ? await ExtensionDB.getExtensionById(existingExtensionId)
+        : undefined;
+      const imported = await importExtensionToRepository(filePath, existingExtension);
+      if (!imported.success) return imported;
 
-        // 确保扩展目录存在
-        if (!existsSync(extensionsPath)) {
-          mkdirSync(extensionsPath, {recursive: true});
-        }
-
-        // 为每个扩展创建唯一目录
-        const extensionId = existingExtensionId || Date.now();
-        const extensionDir = join(extensionsPath, extensionId.toString());
-        if (!existsSync(extensionDir)) {
-          mkdirSync(extensionDir);
-        }
-
-        // 创建临时解压目录
-        const tempExtractDir = join(extensionDir, 'temp');
-        if (existsSync(tempExtractDir)) {
-          const {rm} = require('fs/promises');
-          await rm(tempExtractDir, {recursive: true, force: true});
-        }
-        mkdirSync(tempExtractDir);
-
-        // 复制zip文件到扩展目录
-        const destZipPath = join(extensionDir, 'extension.zip');
-        copyFileSync(filePath, destZipPath);
-
-        // 先解压到临时目录
-        await extract(destZipPath, {dir: tempExtractDir});
-
-        // 现在可以安全地读取 manifest.json 文件
-        const manifestPath = join(tempExtractDir, 'manifest.json');
-        const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-
-        // 使用读取到的版本号创建最终目录
-        const versionDir = join(extensionDir, manifest.version);
-
-        // 如果版本目录已存在，先删除它
-        if (existsSync(versionDir)) {
-          const {rm} = require('fs/promises');
-          await rm(versionDir, {recursive: true, force: true});
-        }
-
-        // 创建新的版本目录
-        mkdirSync(versionDir);
-
-        // 将临时目录中的文件移动到版本目录
-        const files = await readdir(tempExtractDir);
-        for (const file of files) {
-          await rename(join(tempExtractDir, file), join(versionDir, file));
-        }
-
-        // 清理临时文件
-        unlinkSync(destZipPath);
-        rmdirSync(tempExtractDir);
-
-        return {
-          success: true,
-          path: versionDir,
-          version: manifest.version,
-          extensionId,
-        };
-      } catch (error) {
-        console.error('Failed to process extension package:', error);
-        return {
-          success: false,
-          error: (error as Error).message,
-        };
+      let extensionId = existingExtensionId;
+      if (existingExtension && extensionId) {
+        await ExtensionDB.updateExtension(extensionId, {
+          ...imported.extension,
+          updated_at: db.fn.now() as unknown as string,
+        });
+      } else {
+        const createdIds = await ExtensionDB.createExtension({
+          ...(imported.extension as DB.Extension),
+          updated_at: db.fn.now() as unknown as string,
+          imported_at: db.fn.now() as unknown as string,
+        });
+        extensionId = createdIds[0];
       }
-    },
+
+      const runningWindowIds = extensionId
+        ? await ExtensionDB.getRunningWindowIds(extensionId)
+        : [];
+      const {extension: _extension, ...publicImported} = imported;
+      return {
+        ...publicImported,
+        extensionId,
+        runningWindowIds,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: (error as Error).message,
+        message: (error as Error).message,
+      };
+    }
+  };
+
+  ipcMain.handle('extension-upload-package', async (_, filePath: string, existingExtensionId?: number) =>
+    uploadPackage(filePath, existingExtensionId),
   );
+
+  ipcMain.handle('extension-batch-update', async (_, extensionId: number, filePath: string) =>
+    uploadPackage(filePath, extensionId),
+  );
+
+  ipcMain.handle('extension-verify', async (_, extensionId: number) => {
+    const extension = await ExtensionDB.getExtensionById(extensionId);
+    if (!extension) {
+      return {
+        success: false,
+        extensionId,
+        message: 'Extension not found.',
+      };
+    }
+    const result = verifyExtensionRepository(extension);
+    if (result.success) {
+      await ExtensionDB.updateExtension(extensionId, {
+        last_verified_at: db.fn.now() as unknown as string,
+      });
+    }
+    return result;
+  });
 
   ipcMain.handle('extension-sync-windows', async (_, extensionId: number, windowIds: number[]) => {
     try {

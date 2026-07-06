@@ -2,7 +2,12 @@ import {db} from '.';
 import type {DB} from '../../../shared/types/db';
 
 const getAllExtensions = async () => {
-  return await db('extension').select('*');
+  return await db('extension')
+    .leftJoin('window_extension', 'extension.id', '=', 'window_extension.extension_id')
+    .select('extension.*')
+    .count('window_extension.window_id as usageCount')
+    .groupBy('extension.id')
+    .orderBy('extension.updated_at', 'desc');
 };
 
 const getExtensionById = async (id: number) => {
@@ -29,7 +34,12 @@ const updateExtension = async (id: number, extension: Partial<DB.Extension>) => 
 
 const insertExtensionWindows = async (id: number, windows: number[]) => {
   for (const windowId of windows) {
-    await db('window_extension').insert({extension_id: id, window_id: windowId});
+    const existing = await db('window_extension')
+      .where({extension_id: id, window_id: windowId})
+      .first();
+    if (!existing) {
+      await db('window_extension').insert({extension_id: id, window_id: windowId});
+    }
   }
 };
 
@@ -41,6 +51,15 @@ const getExtensionsByWindowId = async (windowId: number) => {
     'id',
     extensionIds.map(e => e.extension_id),
   );
+};
+
+const getRunningWindowIds = async (id: number) => {
+  const rows = await db('window_extension')
+    .leftJoin('window', 'window_extension.window_id', '=', 'window.id')
+    .where('window_extension.extension_id', id)
+    .where('window.status', 2)
+    .select('window.id');
+  return rows.map(row => row.id as number);
 };
 
 const deleteExtensionWindows = async (id: number, windowIds: number[]) => {
@@ -83,4 +102,5 @@ export const ExtensionDB = {
   deleteExtensionWindows,
   getExtensionWindows,
   getExtensionsByWindowId,
+  getRunningWindowIds,
 };

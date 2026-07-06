@@ -15,6 +15,8 @@ import {
   Divider,
   Dropdown,
   Select,
+  Alert,
+  Tag,
 } from 'antd';
 import {useEffect, useState} from 'react';
 import {useTranslation} from 'react-i18next';
@@ -28,9 +30,11 @@ import {
   SyncOutlined,
   ExclamationCircleFilled,
   SearchOutlined,
+  SafetyCertificateOutlined,
+  FolderOpenOutlined,
 } from '@ant-design/icons';
 import type {CheckboxProps, MenuProps, UploadProps} from 'antd';
-import {ExtensionBridge, WindowBridge, GroupBridge} from '#preload';
+import {CommonBridge, ExtensionBridge, WindowBridge, GroupBridge} from '#preload';
 import type {DB} from '../../../../shared/types/db';
 import type {UploadFile} from 'antd/es/upload/interface';
 import {debounce} from 'lodash';
@@ -65,11 +69,17 @@ const Extensions = () => {
   const [searchValue, setSearchValue] = useState('');
   const [groupOptions, setGroupOptions] = useState<DB.Group[]>([{id: -1, name: 'All'}]);
   const [windowDataCopy, setWindowDataCopy] = useState<DB.Window[]>([]);
+  const [pendingCreatedExtensionId, setPendingCreatedExtensionId] = useState<number>();
 
   const moreActionItems: MenuProps['items'] = [
     {
+      key: 'verify',
+      label: 'Verify',
+      icon: <SafetyCertificateOutlined />,
+    },
+    {
       key: 'update',
-      label: t('extension_update'),
+      label: 'Batch update',
       icon: <SyncOutlined />,
     },
     {
@@ -102,6 +112,15 @@ const Extensions = () => {
 
   const handleExtensionAction = async (key: string, extension: DB.Extension) => {
     switch (key) {
+      case 'verify':
+        {
+          const result = await ExtensionBridge.verifyExtension(extension.id!);
+          messageApi[result.success ? 'success' : 'error'](result.message);
+          if (result.success) {
+            await fetchExtensions();
+          }
+        }
+        break;
       case 'update':
         setUploadVisible(true);
         setSelectedExtension(extension);
@@ -168,7 +187,10 @@ const Extensions = () => {
   };
 
   const handleUploadExtension = async (extension: DB.Extension) => {
-    if (!extension.name || !extension.path) {
+    if (!extension.id || !extension.name || !extension.path) {
+      if (!extension.id) {
+        messageApi.error('请先上传扩展安装包');
+      }
       if (!extension.name) {
         messageApi.error('请填写扩展名称');
       }
@@ -177,23 +199,15 @@ const Extensions = () => {
       }
       return;
     }
-    if (selectedExtension) {
+    if (extension.id) {
       try {
-        await ExtensionBridge.updateExtension(selectedExtension.id!, extension);
+        await ExtensionBridge.updateExtension(extension.id, extension);
+        setPendingCreatedExtensionId(undefined);
         messageApi.success('更新成功');
-        handleModalClose();
+        handleModalClose(false);
         fetchExtensions();
       } catch (error) {
         messageApi.error('更新失败');
-      }
-    } else {
-      try {
-        await ExtensionBridge.createExtension(extension);
-        messageApi.success('上传成功');
-        handleModalClose();
-        fetchExtensions();
-      } catch (error) {
-        messageApi.error('上传失败');
       }
     }
   };
@@ -288,12 +302,22 @@ const Extensions = () => {
             selectedExtension?.id,
           );
           if (result.success) {
+            if (!selectedExtension && result.extensionId) {
+              setPendingCreatedExtensionId(result.extensionId);
+            }
             form.setFieldsValue({
               id: result.extensionId,
               path: result.path,
               version: result.version,
+              name: result.manifest?.name,
+              description: result.manifest?.description,
             });
             onSuccess?.(file);
+            if (result.runningWindowIds?.length) {
+              messageApi.warning(
+                `Running profiles need restart to use this update: ${result.runningWindowIds.join(', ')}`,
+              );
+            }
           } else {
             onError?.(new Error(result.error));
             messageApi.error('上传失败: ' + result.error);
@@ -303,6 +327,37 @@ const Extensions = () => {
         }
         setUploading(false);
       },
+    };
+
+    const chooseDirectory = async () => {
+      const selectedPath = await CommonBridge.choosePath('openDirectory');
+      if (!selectedPath) return;
+      try {
+        setUploading(true);
+        const result = await ExtensionBridge.uploadPackage(selectedPath, selectedExtension?.id);
+        if (result.success) {
+          if (!selectedExtension && result.extensionId) {
+            setPendingCreatedExtensionId(result.extensionId);
+          }
+          form.setFieldsValue({
+            id: result.extensionId,
+            path: result.path,
+            version: result.version,
+            name: result.manifest?.name,
+            description: result.manifest?.description,
+          });
+          messageApi.success(result.message || 'Upload success');
+          if (result.runningWindowIds?.length) {
+            messageApi.warning(
+              `Running profiles need restart to use this update: ${result.runningWindowIds.join(', ')}`,
+            );
+          }
+        } else {
+          messageApi.error('上传失败: ' + (result.error || result.message));
+        }
+      } finally {
+        setUploading(false);
+      }
     };
 
     // const iconUploadProps: UploadProps = {
@@ -441,13 +496,28 @@ const Extensions = () => {
           <Form.Item
             label={t('extension_install_package')}
             required
-            tooltip={t('extension_install_package_tooltip')}
+            tooltip="Upload a zip package or choose an unpacked extension directory"
           >
+            {selectedExtension && (
+              <Alert
+                className="mb-3"
+                type="warning"
+                showIcon
+                message="This update replaces the current package for every bound profile. Running profiles must be closed and reopened to take effect."
+              />
+            )}
             <Upload.Dragger {...uploadProps}>
               <CloudUploadOutlined className="text-2xl" />
               <div className="mt-2">{t('extension_upload2')}</div>
-              <div className="text-gray-400 text-sm">{t('extension_zip_format_tip')}</div>
+              <div className="text-gray-400 text-sm">Support .zip files and unpacked directories</div>
             </Upload.Dragger>
+            <Button
+              className="mt-2"
+              icon={<FolderOpenOutlined />}
+              onClick={chooseDirectory}
+            >
+              Choose unpacked directory
+            </Button>
             {uploading && (
               <div className="text-gray-400 text-sm mt-2">{t('extension_uploading')}</div>
             )}
@@ -465,7 +535,7 @@ const Extensions = () => {
               type="text"
               className="w-20"
               size="middle"
-              onClick={() => setUploadVisible(false)}
+              onClick={() => handleModalClose()}
             >
               {t('footer_cancel')}
             </Button>
@@ -483,7 +553,16 @@ const Extensions = () => {
     );
   };
 
-  const handleModalClose = () => {
+  const handleModalClose = (cleanupPending = true) => {
+    if (cleanupPending && pendingCreatedExtensionId && !selectedExtension) {
+      ExtensionBridge.deleteExtension(pendingCreatedExtensionId).finally(() => {
+        setPendingCreatedExtensionId(undefined);
+        fetchExtensions();
+      });
+    }
+    if (!cleanupPending) {
+      setPendingCreatedExtensionId(undefined);
+    }
     form.resetFields();
     setUploadVisible(false);
     setSelectedExtension(undefined);
@@ -565,6 +644,11 @@ const Extensions = () => {
                       <Text type="secondary">
                         {t('extension_version')}: {ext.version}
                       </Text>
+                      <Text type="secondary">Profiles: {ext.usageCount || 0}</Text>
+                      <Text type="secondary">
+                        Hash: {ext.sha256 ? `${ext.sha256.slice(0, 12)}...` : '-'}
+                      </Text>
+                      {ext.update_url_removed ? <Tag color="green">No auto update</Tag> : null}
                       <Text type="secondary">
                         {t('extension_update_time')}: {ext.updated_at}
                       </Text>
@@ -584,7 +668,7 @@ const Extensions = () => {
           </div>
         }
         open={uploadVisible}
-        onCancel={handleModalClose}
+        onCancel={() => handleModalClose()}
         footer={null}
         width={640}
       >

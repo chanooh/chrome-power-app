@@ -1,5 +1,9 @@
 import {ipcRenderer} from 'electron';
 import type {DB} from '../../../shared/types/db';
+import type {
+  ExtensionImportResult,
+  ExtensionVerificationResult,
+} from '../../../shared/types/extension';
 
 export const ExtensionBridge = {
   import: (filePath: string) => ipcRenderer.invoke('extension-import', filePath),
@@ -11,8 +15,15 @@ export const ExtensionBridge = {
   getExtensionWindows: (extensionId: number) =>
     ipcRenderer.invoke('extension-get-windows', extensionId),
   createExtension: (extension: DB.Extension) => ipcRenderer.invoke('extension-create', extension),
-  uploadPackage: (filePath: string, extensionId?: number) =>
+  uploadPackage: (filePath: string, extensionId?: number): Promise<ExtensionImportResult> =>
     ipcRenderer.invoke('extension-upload-package', filePath, extensionId),
+  batchUpdateExtension: (
+    extensionId: number,
+    filePath: string,
+  ): Promise<ExtensionImportResult> =>
+    ipcRenderer.invoke('extension-batch-update', extensionId, filePath),
+  verifyExtension: (extensionId: number): Promise<ExtensionVerificationResult> =>
+    ipcRenderer.invoke('extension-verify', extensionId),
   updateExtension: (extensionId: number, extension: Partial<DB.Extension>) =>
     ipcRenderer.invoke('extension-update', extensionId, extension),
   deleteExtension: (extensionId: number) => ipcRenderer.invoke('extension-delete', extensionId),

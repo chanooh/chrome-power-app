@@ -29,6 +29,7 @@ import {buildBrowserLaunchParameters} from './launch-params';
 import {stopFingerprintCdpSession} from './cdp';
 import {serializeFingerprintSnapshot} from './snapshot';
 import {ensureManagedProfileDirectory} from '../profile/storage';
+import {verifyExtensionRepository} from '../extensions/repository';
 
 const mutex = new Mutex();
 
@@ -307,6 +308,20 @@ export async function openFingerprintWindow(id: number, headless = false) {
       const appStartUrl = getClientPort()
         ? `http://localhost:${getClientPort()}/#/start?windowId=${id}&serverPort=${getPort()}`
         : undefined;
+      const verifiedExtensionPaths: string[] = [];
+      for (const extension of extensionData) {
+        const verification = verifyExtensionRepository(extension);
+        if (!verification.success) {
+          const message = `Extension "${extension.name}" failed verification: ${verification.message}`;
+          logger.error(message);
+          bridgeMessageToUI({
+            type: 'error',
+            text: message,
+          });
+          return null;
+        }
+        verifiedExtensionPaths.push(extension.current_path || extension.path);
+      }
       const launchParamter = buildBrowserLaunchParameters({
         managed: launchTarget.managed,
         chromePort,
@@ -315,7 +330,7 @@ export async function openFingerprintWindow(id: number, headless = false) {
         headless,
         isMac,
         appStartUrl,
-        userExtensionPaths: extensionData.map(extension => extension.path),
+        userExtensionPaths: verifiedExtensionPaths,
         snapshot: fingerprintSnapshot,
       });
 
