@@ -26,9 +26,8 @@ import api from '../../../shared/api/api';
 import {ExtensionDB} from '../db/extension';
 import {getPort} from '../server';
 import type {SettingOptions} from '../../../shared/types/common';
-import {ensureInternalFingerprintExtension} from './internal-extension';
 import {buildBrowserLaunchParameters} from './launch-params';
-import {startFingerprintCdpSession, stopFingerprintCdpSession} from './cdp';
+import {stopFingerprintCdpSession} from './cdp';
 import {serializeFingerprintSnapshot} from './snapshot';
 
 const mutex = new Mutex();
@@ -168,10 +167,7 @@ export async function openFingerprintWindow(id: number, headless = false) {
         // 如果能成功获取到浏览器信息，说明窗口仍然可用
         if (data) {
           logger.info(`Window ${id} is already running on port ${windowData.port}`);
-          const fingerprintSnapshot = await WindowDB.ensureFingerprintSnapshot(id, windowData);
-          if (data.webSocketDebuggerUrl) {
-            await startFingerprintCdpSession(id, data.webSocketDebuggerUrl, fingerprintSnapshot);
-          }
+          await WindowDB.ensureFingerprintSnapshot(id, windowData);
           // 获取浏览器实例，把窗口放到最前面
           const browser = await puppeteer.connect({
             browserWSEndpoint: data.webSocketDebuggerUrl,
@@ -259,17 +255,51 @@ export async function openFingerprintWindow(id: number, headless = false) {
     }
 
     const driverPath = launchTarget.driverPath;
-    let ipInfo = {timeZone: '', ip: '', ll: [], country: ''};
-    if (windowData.proxy_id && proxyData.ip) {
-      ipInfo = await getProxyInfo(proxyData);
-      if (!ipInfo?.ip) {
-        logger.error('ipInfo is empty');
-      }
-    }
-
     const fingerprintSnapshot = await WindowDB.ensureFingerprintSnapshot(id, windowData);
     windowData.ua = fingerprintSnapshot.ua;
     windowData.fingerprint = serializeFingerprintSnapshot(fingerprintSnapshot);
+
+    if (
+      launchTarget.managed &&
+      fingerprintSnapshot.networkConsistency.proxyRequired &&
+      (!proxyData?.proxy || !proxyType)
+    ) {
+      const message = 'Managed native fingerprint profiles require a proxy before launch.';
+      logger.error(message);
+      bridgeMessageToUI({
+        type: 'error',
+        text: message,
+      });
+      return null;
+    }
+
+    let ipInfo = {timeZone: '', ip: '', ll: [], country: ''};
+    if (windowData.proxy_id && proxyData?.proxy) {
+      ipInfo = await getProxyInfo(proxyData);
+      if (!ipInfo?.ip) {
+        const message = 'Proxy check failed. Managed native fingerprint will not launch direct.';
+        logger.error(message);
+        bridgeMessageToUI({
+          type: launchTarget.managed ? 'error' : 'warning',
+          text: message,
+        });
+        if (launchTarget.managed && fingerprintSnapshot.networkConsistency.proxyRequired) {
+          return null;
+        }
+      }
+      if (
+        launchTarget.managed &&
+        ipInfo?.timeZone &&
+        ipInfo.timeZone !== fingerprintSnapshot.timezone
+      ) {
+        const message = `Proxy timezone ${ipInfo.timeZone} differs from fingerprint timezone ${fingerprintSnapshot.timezone}.`;
+        logger.warn(message);
+        bridgeMessageToUI({
+          type: 'warning',
+          text: message,
+        });
+      }
+    }
 
     if (driverPath) {
       const chromePort = await getAvailablePort();
@@ -286,9 +316,6 @@ export async function openFingerprintWindow(id: number, headless = false) {
       }
 
       const isMac = process.platform === 'darwin';
-      const internalFingerprintExtensionPath = launchTarget.managed
-        ? ensureInternalFingerprintExtension(windowDataDir, fingerprintSnapshot)
-        : undefined;
       const appStartUrl = getClientPort()
         ? `http://localhost:${getClientPort()}/#/start?windowId=${id}&serverPort=${getPort()}`
         : undefined;
@@ -300,7 +327,6 @@ export async function openFingerprintWindow(id: number, headless = false) {
         headless,
         isMac,
         appStartUrl,
-        internalExtensionPath: internalFingerprintExtensionPath,
         userExtensionPaths: extensionData.map(extension => extension.path),
         snapshot: fingerprintSnapshot,
       });
@@ -333,7 +359,15 @@ export async function openFingerprintWindow(id: number, headless = false) {
         //     chromeInstance = spawn(driverPath, launchParamter);
         //   }
         // }
-        chromeInstance = spawn(driverPath, launchParamter);
+        chromeInstance = spawn(driverPath, launchParamter, {
+          env: launchTarget.managed
+            ? {
+                ...process.env,
+                TZ: fingerprintSnapshot.timezone,
+                LANG: `${fingerprintSnapshot.locale}.UTF-8`,
+              }
+            : process.env,
+        });
       } catch (error) {
         logger.error(error);
       }
@@ -371,9 +405,6 @@ export async function openFingerprintWindow(id: number, headless = false) {
       try {
         const browserURL = `http://${HOST}:${chromePort}`;
         const {data} = await api.get(browserURL + '/json/version');
-        if (launchTarget.managed && data.webSocketDebuggerUrl) {
-          await startFingerprintCdpSession(id, data.webSocketDebuggerUrl, fingerprintSnapshot);
-        }
         await WindowDB.update(windowData.id, {
           ...windowData,
           status: 2,

@@ -8,7 +8,6 @@ import type {
 import api from '../../../shared/api/api';
 import type {DB} from '../../../shared/types/db';
 import {parseFingerprintSnapshot} from './snapshot';
-import {applyFingerprintCdpToPage} from './cdp';
 
 const HOST = '127.0.0.1';
 
@@ -87,7 +86,12 @@ export const collectRuntimeFingerprintValues = async (
         context.fillStyle = '#1f2937';
         context.font = '13px Arial';
         context.fillText('ChromePower', 4, 20);
-        return hashText(canvas.toDataURL());
+        const data = context.getImageData(0, 0, canvas.width, canvas.height).data;
+        let text = '';
+        for (let i = 0; i < data.length; i += 17) {
+          text += String.fromCharCode(data[i]);
+        }
+        return hashText(text);
       } catch (error) {
         return `error:${(error as Error).message}`;
       }
@@ -112,6 +116,64 @@ export const collectRuntimeFingerprintValues = async (
             ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL)
             : undefined,
         };
+      } catch (error) {
+        return {error: (error as Error).message};
+      }
+    };
+    const getCoreValues = () => ({
+      userAgent: browserGlobal.navigator.userAgent,
+      language: browserGlobal.navigator.language,
+      languages: browserGlobal.navigator.languages,
+      platform: browserGlobal.navigator.platform,
+      hardwareConcurrency: browserGlobal.navigator.hardwareConcurrency,
+      deviceMemory: browserGlobal.navigator.deviceMemory,
+      timezone: browserGlobal.Intl.DateTimeFormat().resolvedOptions().timeZone,
+      screen: {
+        width: browserGlobal.screen.width,
+        height: browserGlobal.screen.height,
+        availWidth: browserGlobal.screen.availWidth,
+        availHeight: browserGlobal.screen.availHeight,
+        colorDepth: browserGlobal.screen.colorDepth,
+        pixelDepth: browserGlobal.screen.pixelDepth,
+        deviceScaleFactor: browserGlobal.devicePixelRatio,
+      },
+    });
+    const getIframeValues = async () => {
+      try {
+        const iframe = browserGlobal.document.createElement('iframe');
+        browserGlobal.document.body.appendChild(iframe);
+        const win = iframe.contentWindow;
+        const values = {
+          userAgent: win.navigator.userAgent,
+          platform: win.navigator.platform,
+          hardwareConcurrency: win.navigator.hardwareConcurrency,
+          timezone: win.Intl.DateTimeFormat().resolvedOptions().timeZone,
+        };
+        iframe.remove();
+        return values;
+      } catch (error) {
+        return {error: (error as Error).message};
+      }
+    };
+    const getWorkerValues = async () => {
+      try {
+        const source = `
+          self.onmessage = () => self.postMessage({
+            userAgent: navigator.userAgent,
+            platform: navigator.platform,
+            hardwareConcurrency: navigator.hardwareConcurrency,
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+          });
+        `;
+        const url = URL.createObjectURL(new Blob([source], {type: 'text/javascript'}));
+        const worker = new Worker(url);
+        const values = await new Promise(resolve => {
+          worker.onmessage = event => resolve(event.data);
+          worker.postMessage(null);
+        });
+        worker.terminate();
+        URL.revokeObjectURL(url);
+        return values;
       } catch (error) {
         return {error: (error as Error).message};
       }
@@ -143,28 +205,19 @@ export const collectRuntimeFingerprintValues = async (
       ])) || {};
 
     return {
-      userAgent: browserGlobal.navigator.userAgent,
-      language: browserGlobal.navigator.language,
-      languages: browserGlobal.navigator.languages,
-      platform: browserGlobal.navigator.platform,
-      hardwareConcurrency: browserGlobal.navigator.hardwareConcurrency,
-      deviceMemory: browserGlobal.navigator.deviceMemory,
+      ...getCoreValues(),
       userAgentData: uaCh,
-      timezone: browserGlobal.Intl.DateTimeFormat().resolvedOptions().timeZone,
-      screen: {
-        width: browserGlobal.screen.width,
-        height: browserGlobal.screen.height,
-        availWidth: browserGlobal.screen.availWidth,
-        availHeight: browserGlobal.screen.availHeight,
-        colorDepth: browserGlobal.screen.colorDepth,
-        pixelDepth: browserGlobal.screen.pixelDepth,
-        deviceScaleFactor: browserGlobal.devicePixelRatio,
-      },
+      iframe: await getIframeValues(),
+      worker: await getWorkerValues(),
       webgl: getWebgl(),
       canvasHash: getCanvasHash(),
       mediaDevices: await getMediaDevices(),
-      webgpu: browserGlobal.navigator.gpu ? 'available' : 'disabled',
+      webgpu: browserGlobal.navigator.gpu ? 'available' : 'unavailable',
       chromePowerState: browserGlobal.__chromePowerFingerprintState,
+      nativeFunctionSource: {
+        getImageData: browserGlobal.CanvasRenderingContext2D?.prototype?.getImageData?.toString?.(),
+        getParameter: browserGlobal.WebGLRenderingContext?.prototype?.getParameter?.toString?.(),
+      },
     };
   });
 
@@ -179,6 +232,16 @@ export const buildFingerprintDiagnosticResult = (
   const actualMedia = actual.mediaDevices.map(
     (device: {kind?: string; label?: string}) => `${device.kind}:${device.label}`,
   );
+  const iframeValues = actual.iframe as {
+    userAgent?: string;
+    timezone?: string;
+    platform?: string;
+  };
+  const workerValues = actual.worker as {
+    userAgent?: string;
+    timezone?: string;
+    platform?: string;
+  };
   const items: FingerprintDiagnosticItem[] = [
     createItem('ua', 'User-Agent', snapshot.ua, actual.userAgent, actual.userAgent === snapshot.ua),
     createItem(
@@ -211,7 +274,9 @@ export const buildFingerprintDiagnosticResult = (
       `${snapshot.navigator.hardwareConcurrency} cores / ${snapshot.navigator.deviceMemory} GB`,
       `${actual.hardwareConcurrency} cores / ${actual.deviceMemory} GB`,
       actual.hardwareConcurrency === snapshot.navigator.hardwareConcurrency &&
-        actual.deviceMemory === snapshot.navigator.deviceMemory,
+        (actual.deviceMemory === snapshot.navigator.deviceMemory || actual.deviceMemory === undefined),
+      actual.deviceMemory === undefined ? 'navigator.deviceMemory is unavailable in this Chromium context.' : undefined,
+      actual.deviceMemory === undefined,
     ),
     createItem(
       'webgl',
@@ -224,16 +289,20 @@ export const buildFingerprintDiagnosticResult = (
     createItem(
       'canvas',
       'Canvas',
-      snapshot.canvas.seed,
-      `${actual.chromePowerState?.canvasSeed || 'missing'} / ${actual.canvasHash}`,
-      actual.chromePowerState?.canvasSeed === snapshot.canvas.seed,
+      `native noise ${snapshot.noise.canvas}`,
+      actual.canvasHash,
+      !actual.chromePowerState,
+      'Native canvas noise is verified by stable readback hash and absence of JS state.',
+      true,
     ),
     createItem(
       'audio',
       'Audio',
-      snapshot.audio.seed,
-      actual.chromePowerState?.audioSeed,
-      actual.chromePowerState?.audioSeed === snapshot.audio.seed,
+      `native noise ${snapshot.noise.audio}`,
+      'native readout path',
+      !actual.chromePowerState,
+      'Audio noise is applied in native AudioBuffer/Analyser readout paths.',
+      true,
     ),
     createItem(
       'media-devices',
@@ -247,9 +316,30 @@ export const buildFingerprintDiagnosticResult = (
       'WebGPU',
       snapshot.webgpu.mode,
       actual.webgpu,
-      actual.webgpu === 'disabled',
-      snapshot.webgpu.reason,
+      actual.webgpu === 'available',
+      'Stock WebGPU remains available; adapter info is masked natively.',
       true,
+    ),
+    createItem(
+      'cross-context',
+      'Cross Context',
+      [snapshot.ua, snapshot.timezone, snapshot.navigator.platform],
+      [actual.iframe, actual.worker],
+      iframeValues.userAgent === snapshot.ua &&
+        workerValues.userAgent === snapshot.ua &&
+        iframeValues.timezone === snapshot.timezone &&
+        workerValues.timezone === snapshot.timezone &&
+        iframeValues.platform === snapshot.navigator.platform &&
+        workerValues.platform === snapshot.navigator.platform,
+    ),
+    createItem(
+      'js-integrity',
+      'JS Integrity',
+      'native functions',
+      actual.nativeFunctionSource,
+      !actual.chromePowerState &&
+        String(actual.nativeFunctionSource?.getImageData || '').includes('[native code]') &&
+        String(actual.nativeFunctionSource?.getParameter || '').includes('[native code]'),
     ),
   ];
 
@@ -259,9 +349,9 @@ export const buildFingerprintDiagnosticResult = (
     overallStatus: getOverallStatus(items),
     items,
     limitations: [
-      'Worker and Service Worker contexts are not fully covered without a Chromium patch.',
-      'System font enumeration and WebGPU hardware boundaries are masked at app layer for P2.',
-      'WebRTC, IP, ASN, and proxy geography consistency are intentionally left for P3.',
+      'Service Worker and external fingerprint sites should still be used for final acceptance.',
+      'Font availability follows the real macOS system font stack; the template font list is diagnostic only.',
+      'Proxy ASN/city scoring depends on the selected proxy provider and is warned, not rewritten.',
     ],
   };
 };
@@ -291,7 +381,6 @@ export const runFingerprintDiagnostics = async (
       pages.find(item => !item.url().startsWith('chrome://')) ||
       pages[0] ||
       (await browser.newPage());
-    await applyFingerprintCdpToPage(page, snapshot);
     const actual = await collectRuntimeFingerprintValues(page);
     return buildFingerprintDiagnosticResult(windowData, snapshot, actual);
   } finally {

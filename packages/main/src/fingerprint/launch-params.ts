@@ -8,13 +8,15 @@ interface BrowserLaunchParameterOptions {
   headless?: boolean;
   isMac?: boolean;
   appStartUrl?: string;
-  internalExtensionPath?: string;
   userExtensionPaths?: string[];
   snapshot?: FingerprintSnapshot;
 }
 
 const getExtensionArgument = (paths: string[]) =>
   paths.length > 0 ? `--load-extension=${paths.join(',')}` : '';
+
+export const encodeNativeFingerprintPayload = (snapshot: FingerprintSnapshot) =>
+  Buffer.from(JSON.stringify(snapshot), 'utf8').toString('base64url');
 
 export const buildBrowserLaunchParameters = ({
   managed,
@@ -24,7 +26,6 @@ export const buildBrowserLaunchParameters = ({
   headless = false,
   isMac = process.platform === 'darwin',
   appStartUrl,
-  internalExtensionPath,
   userExtensionPaths = [],
   snapshot,
 }: BrowserLaunchParameterOptions) => {
@@ -44,7 +45,8 @@ export const buildBrowserLaunchParameters = ({
         '--disable-background-mode',
         '--disable-component-update',
         '--disable-sync',
-        '--disable-features=WebGPU,UnsafeWebGPU',
+        '--webrtc-ip-handling-policy=disable_non_proxied_udp',
+        '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
         '--remote-debugging-address=127.0.0.1',
         `--remote-debugging-port=${chromePort}`,
         `--user-data-dir=${windowDataDir}`,
@@ -55,6 +57,7 @@ export const buildBrowserLaunchParameters = ({
     launchParameters.push(`--user-agent=${snapshot.ua}`);
     launchParameters.push(`--lang=${snapshot.locale}`);
     launchParameters.push(`--accept-lang=${snapshot.languages.join(',')}`);
+    launchParameters.push(`--chrome-power-fingerprint=${encodeNativeFingerprintPayload(snapshot)}`);
   }
 
   if (finalProxy) {
@@ -62,10 +65,7 @@ export const buildBrowserLaunchParameters = ({
   }
 
   const extensionArgument = getExtensionArgument(
-    [
-      managed ? internalExtensionPath : undefined,
-      ...userExtensionPaths,
-    ].filter((path): path is string => Boolean(path)),
+    userExtensionPaths.filter((path): path is string => Boolean(path)),
   );
   if (extensionArgument) {
     launchParameters.push(extensionArgument);
