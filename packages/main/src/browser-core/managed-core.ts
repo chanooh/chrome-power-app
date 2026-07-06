@@ -13,6 +13,8 @@ export const MANAGED_CHROMIUM_VERSION = '150.0.7871.47';
 export const MANAGED_CHROMIUM_TAG = '150.0.7871.47';
 export const MANAGED_CHROMIUM_COMMIT = '0c3cca15d78645281db2d339b2dc3d6fad4ee90a';
 export const MANAGED_CHROMIUM_ARCH = 'mac-arm64';
+export const MANAGED_CHROMIUM_FINGERPRINT_ENGINE_VERSION = 'native-macos-v2';
+export const MANAGED_CHROMIUM_PATCHSET_VERSION = 'native-fingerprint-kernel-v1';
 
 export const getManagedChromiumVersionDir = (rootPath = MANAGED_BROWSER_CORE_ROOT) =>
   join(rootPath, 'chromium', MANAGED_CHROMIUM_VERSION, MANAGED_CHROMIUM_ARCH);
@@ -40,6 +42,9 @@ export interface ManagedBrowserManifest {
   executablePath: string;
   gnArgs: string[];
   depotToolsCommit: string;
+  fingerprintEngineVersion: string;
+  patchsetVersion: string;
+  chromiumPatchsetSha256: string;
   executableSha256: string;
   builtAt: string;
 }
@@ -116,6 +121,15 @@ export const validateManagedBrowserManifest = (
   }
   if (!manifest.executablePath || manifest.executablePath !== expectedExecutable) {
     throw new Error(`Managed Chromium executable path mismatch: ${manifest.executablePath}`);
+  }
+  if (manifest.fingerprintEngineVersion !== MANAGED_CHROMIUM_FINGERPRINT_ENGINE_VERSION) {
+    throw new Error(`Managed Chromium fingerprint engine mismatch: ${manifest.fingerprintEngineVersion}`);
+  }
+  if (manifest.patchsetVersion !== MANAGED_CHROMIUM_PATCHSET_VERSION) {
+    throw new Error(`Managed Chromium patchset mismatch: ${manifest.patchsetVersion}`);
+  }
+  if (!manifest.chromiumPatchsetSha256 || !/^[a-f0-9]{64}$/i.test(manifest.chromiumPatchsetSha256)) {
+    throw new Error('Managed Chromium patchset sha256 is missing or invalid');
   }
   if (!manifest.executableSha256 || !/^[a-f0-9]{64}$/i.test(manifest.executableSha256)) {
     throw new Error('Managed Chromium executable sha256 is missing or invalid');

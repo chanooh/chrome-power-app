@@ -32,6 +32,15 @@ const COMMIT = '0c3cca15d78645281db2d339b2dc3d6fad4ee90a';
 const DEPOT_TOOLS_COMMIT = '1b1b01fa912786b88a79f3504176a275183839b5';
 const ARCH = 'mac-arm64';
 const BUILD_DIR_NAME = 'ChromePower-arm64';
+const PATCHSET_VERSION = 'native-fingerprint-kernel-v1';
+const FINGERPRINT_ENGINE_VERSION = 'native-macos-v2';
+const PATCHSET_PATH = join(
+  process.cwd(),
+  'patches',
+  'chromium',
+  VERSION,
+  'native-fingerprint-kernel.patch',
+);
 const INSTALLED_VERSION_DIR = join(CORE_ROOT, 'chromium', VERSION, ARCH);
 const INSTALLED_APP = join(INSTALLED_VERSION_DIR, 'Chromium.app');
 const INSTALLED_EXECUTABLE = join(INSTALLED_APP, 'Contents', 'MacOS', 'Chromium');
@@ -71,6 +80,15 @@ function run(cmd, args, options = {}) {
   if (result.status !== 0) {
     fail(`Command failed: ${cmd} ${args.join(' ')}`);
   }
+}
+
+function commandSucceeds(cmd, args, options = {}) {
+  const result = spawnSync(cmd, args, {
+    stdio: 'ignore',
+    env: buildEnv(),
+    ...options,
+  });
+  return result.status === 0;
 }
 
 function output(cmd, args, options = {}) {
@@ -233,6 +251,7 @@ function buildChromium() {
   assertMountedApfsVolume();
   assertXcode();
   ensureDepotTools();
+  verifyPatchset({requireApplied: true});
   const outDir = writeGnArgs();
   run('gn', ['gen', `out/${BUILD_DIR_NAME}`], {cwd: CHROMIUM_SRC});
   run('autoninja', ['-C', `out/${BUILD_DIR_NAME}`, 'chrome'], {cwd: CHROMIUM_SRC});
@@ -247,6 +266,59 @@ function sha256(filePath) {
   const hash = createHash('sha256');
   hash.update(readFileSync(filePath));
   return hash.digest('hex');
+}
+
+function assertChromiumCheckout() {
+  if (!existsSync(CHROMIUM_SRC)) {
+    fail('Chromium source is missing. Run `npm run chromium:sync` first.');
+  }
+  const currentCommit = output('git', ['rev-parse', 'HEAD'], {cwd: CHROMIUM_SRC});
+  if (currentCommit !== COMMIT) {
+    fail(`Chromium checkout mismatch: expected ${COMMIT}, got ${currentCommit}`);
+  }
+}
+
+function getPatchsetSha256() {
+  if (!existsSync(PATCHSET_PATH)) {
+    fail(`Chromium patchset not found: ${PATCHSET_PATH}`);
+  }
+  return sha256(PATCHSET_PATH);
+}
+
+function verifyPatchset({requireApplied = false} = {}) {
+  assertChromiumCheckout();
+  getPatchsetSha256();
+  const reverseApplies = commandSucceeds('git', ['apply', '--reverse', '--check', PATCHSET_PATH], {
+    cwd: CHROMIUM_SRC,
+  });
+  if (reverseApplies) {
+    log(`patchset applied: ${PATCHSET_VERSION}`);
+    return;
+  }
+  const forwardApplies = commandSucceeds('git', ['apply', '--check', PATCHSET_PATH], {
+    cwd: CHROMIUM_SRC,
+  });
+  if (forwardApplies && !requireApplied) {
+    log(`patchset is clean and ready to apply: ${PATCHSET_VERSION}`);
+    return;
+  }
+  if (forwardApplies && requireApplied) {
+    fail(`Patchset ${PATCHSET_VERSION} is not applied. Run \`npm run chromium:patch\`.`);
+  }
+  fail(`Patchset ${PATCHSET_VERSION} does not apply cleanly and is not fully applied.`);
+}
+
+function patchChromium() {
+  assertMacArm64();
+  assertMountedApfsVolume();
+  assertChromiumCheckout();
+  getPatchsetSha256();
+  if (commandSucceeds('git', ['apply', '--reverse', '--check', PATCHSET_PATH], {cwd: CHROMIUM_SRC})) {
+    log(`patchset already applied: ${PATCHSET_VERSION}`);
+    return;
+  }
+  run('git', ['apply', PATCHSET_PATH], {cwd: CHROMIUM_SRC});
+  verifyPatchset({requireApplied: true});
 }
 
 function installCore() {
@@ -272,6 +344,9 @@ function installCore() {
     executablePath: INSTALLED_EXECUTABLE,
     gnArgs: GN_ARGS,
     depotToolsCommit: DEPOT_TOOLS_COMMIT,
+    fingerprintEngineVersion: FINGERPRINT_ENGINE_VERSION,
+    patchsetVersion: PATCHSET_VERSION,
+    chromiumPatchsetSha256: getPatchsetSha256(),
     executableSha256: executableHash,
     builtAt: new Date().toISOString(),
   };
@@ -288,6 +363,13 @@ function verifyCore() {
   const manifest = JSON.parse(readFileSync(MANIFEST_PATH, 'utf8'));
   if (manifest.version !== VERSION || manifest.commit !== COMMIT || manifest.arch !== ARCH) {
     fail('Manifest version, commit, or arch does not match the locked Chromium core.');
+  }
+  if (
+    manifest.fingerprintEngineVersion !== FINGERPRINT_ENGINE_VERSION ||
+    manifest.patchsetVersion !== PATCHSET_VERSION ||
+    manifest.chromiumPatchsetSha256 !== getPatchsetSha256()
+  ) {
+    fail('Manifest patchset metadata does not match the native fingerprint patchset.');
   }
   if (!existsSync(INSTALLED_EXECUTABLE) || !statSync(INSTALLED_EXECUTABLE).isFile()) {
     fail(`Installed executable not found: ${INSTALLED_EXECUTABLE}`);
@@ -439,6 +521,9 @@ function printHelp() {
 Commands:
   prepare       Check /Volumes/F, Xcode, SDK, and depot_tools.
   sync          Checkout Chromium ${TAG} at ${COMMIT} under /Volumes/F.
+  patch         Apply the ChromePower native fingerprint patchset.
+  verify-patchset
+                Validate that the patchset is applied or cleanly applicable.
   build         Build Chromium arm64 from the checked out source.
   install-core  Copy Chromium.app into /Volumes/F/ChromePowerCore and write manifest.
   verify        Validate installed manifest/hash/version and CDP startup.
@@ -450,6 +535,10 @@ try {
     prepare();
   } else if (command === 'sync') {
     syncChromium();
+  } else if (command === 'patch') {
+    patchChromium();
+  } else if (command === 'verify-patchset') {
+    verifyPatchset();
   } else if (command === 'build') {
     buildChromium();
   } else if (command === 'install-core') {
