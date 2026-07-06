@@ -14,7 +14,7 @@ import {generateFingerprintSnapshot} from '../src/fingerprint/snapshot';
 
 describe('fingerprint CDP overrides', () => {
   test('builds UA-CH, locale, timezone, and screen commands', () => {
-    const snapshot = generateFingerprintSnapshot('profile-alpha', 'macbook-air-13');
+    const snapshot = generateFingerprintSnapshot('profile-alpha', 'macbook-pro-14-m4');
     const commands = getFingerprintCdpCommands(snapshot);
 
     expect(commands.map(command => command.method)).toEqual([

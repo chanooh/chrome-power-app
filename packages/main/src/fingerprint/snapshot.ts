@@ -14,20 +14,18 @@ import {MANAGED_CHROMIUM_VERSION} from '../browser-core/managed-core';
 
 type ConcreteTemplateId = Exclude<MacDeviceTemplateId, 'auto'>;
 
+export const FINGERPRINT_ENGINE_VERSION = 'native-macos-v2';
+
 const CHROMIUM_MAJOR_VERSION = MANAGED_CHROMIUM_VERSION.split('.')[0];
 const CHROMIUM_REDUCED_VERSION = `${CHROMIUM_MAJOR_VERSION}.0.0.0`;
 const MACOS_REDUCED_UA_VERSION = '10_15_7';
+const MACOS_PLATFORM_VERSION = '26.5.0';
 
 const BASE_UA = `Mozilla/5.0 (Macintosh; Intel Mac OS X ${MACOS_REDUCED_UA_VERSION}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${CHROMIUM_REDUCED_VERSION} Safari/537.36`;
 
 const COMMON_MAC_FONTS = [
   'Arial',
-  'Arial Black',
-  'Arial Narrow',
-  'Avenir',
-  'Avenir Next',
   'Courier New',
-  'Georgia',
   'Helvetica',
   'Helvetica Neue',
   'Menlo',
@@ -35,7 +33,6 @@ const COMMON_MAC_FONTS = [
   'San Francisco',
   'Times',
   'Times New Roman',
-  'Trebuchet MS',
   'Verdana',
 ];
 
@@ -49,78 +46,9 @@ const LOCALE_TIMEZONE_POOL = [
 
 const TEMPLATES: MacDeviceTemplate[] = [
   {
-    id: 'macbook-air-13',
-    name: 'MacBook Air 13',
-    model: 'MacBookAir10,1',
-    cpuLabel: 'Apple M2',
-    screen: {
-      width: 1470,
-      height: 956,
-      availWidth: 1470,
-      availHeight: 923,
-      colorDepth: 30,
-      pixelDepth: 30,
-      deviceScaleFactor: 2,
-    },
-    hardwareConcurrency: 8,
-    deviceMemory: 8,
-    webglRenderer: 'ANGLE (Apple, ANGLE Metal Renderer: Apple M2, Unspecified Version)',
-    mediaLabels: {
-      microphone: 'MacBook Air Microphone',
-      camera: 'FaceTime HD Camera',
-      speaker: 'MacBook Air Speakers',
-    },
-  },
-  {
-    id: 'macbook-pro-14',
-    name: 'MacBook Pro 14',
-    model: 'MacBookPro18,3',
-    cpuLabel: 'Apple M3 Pro',
-    screen: {
-      width: 1512,
-      height: 982,
-      availWidth: 1512,
-      availHeight: 945,
-      colorDepth: 30,
-      pixelDepth: 30,
-      deviceScaleFactor: 2,
-    },
-    hardwareConcurrency: 12,
-    deviceMemory: 16,
-    webglRenderer: 'ANGLE (Apple, ANGLE Metal Renderer: Apple M3 Pro, Unspecified Version)',
-    mediaLabels: {
-      microphone: 'MacBook Pro Microphone',
-      camera: 'FaceTime HD Camera',
-      speaker: 'MacBook Pro Speakers',
-    },
-  },
-  {
-    id: 'imac-24',
-    name: 'iMac 24',
-    model: 'iMac21,1',
-    cpuLabel: 'Apple M3',
-    screen: {
-      width: 2240,
-      height: 1260,
-      availWidth: 2240,
-      availHeight: 1215,
-      colorDepth: 30,
-      pixelDepth: 30,
-      deviceScaleFactor: 2,
-    },
-    hardwareConcurrency: 8,
-    deviceMemory: 8,
-    webglRenderer: 'ANGLE (Apple, ANGLE Metal Renderer: Apple M3, Unspecified Version)',
-    mediaLabels: {
-      microphone: 'iMac Microphone',
-      camera: 'FaceTime HD Camera',
-      speaker: 'iMac Speakers',
-    },
-  },
-  {
-    id: 'mac-mini',
-    name: 'Mac mini',
-    model: 'Macmini9,1',
+    id: 'mac-mini-m4',
+    name: 'Mac mini M4',
+    model: 'Mac16,10',
     cpuLabel: 'Apple M4',
     screen: {
       width: 1920,
@@ -134,13 +62,84 @@ const TEMPLATES: MacDeviceTemplate[] = [
     hardwareConcurrency: 10,
     deviceMemory: 16,
     webglRenderer: 'ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)',
+    webgpu: {
+      vendor: 'Apple',
+      architecture: 'Apple M4',
+      device: 'Apple M4',
+      description: 'Apple M4',
+    },
     mediaLabels: {
       microphone: 'External Microphone',
       camera: 'Studio Display Camera',
       speaker: 'External Speakers',
     },
   },
+  {
+    id: 'macbook-pro-14-m4',
+    name: 'MacBook Pro 14 M4',
+    model: 'Mac16,1',
+    cpuLabel: 'Apple M4',
+    screen: {
+      width: 1512,
+      height: 982,
+      availWidth: 1512,
+      availHeight: 945,
+      colorDepth: 30,
+      pixelDepth: 30,
+      deviceScaleFactor: 2,
+    },
+    hardwareConcurrency: 10,
+    deviceMemory: 16,
+    webglRenderer: 'ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)',
+    webgpu: {
+      vendor: 'Apple',
+      architecture: 'Apple M4',
+      device: 'Apple M4',
+      description: 'Apple M4',
+    },
+    mediaLabels: {
+      microphone: 'MacBook Pro Microphone',
+      camera: 'FaceTime HD Camera',
+      speaker: 'MacBook Pro Speakers',
+    },
+  },
+  {
+    id: 'imac-24-m4',
+    name: 'iMac 24 M4',
+    model: 'Mac16,12',
+    cpuLabel: 'Apple M4',
+    screen: {
+      width: 2240,
+      height: 1260,
+      availWidth: 2240,
+      availHeight: 1215,
+      colorDepth: 30,
+      pixelDepth: 30,
+      deviceScaleFactor: 2,
+    },
+    hardwareConcurrency: 10,
+    deviceMemory: 16,
+    webglRenderer: 'ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)',
+    webgpu: {
+      vendor: 'Apple',
+      architecture: 'Apple M4',
+      device: 'Apple M4',
+      description: 'Apple M4',
+    },
+    mediaLabels: {
+      microphone: 'iMac Microphone',
+      camera: 'FaceTime HD Camera',
+      speaker: 'iMac Speakers',
+    },
+  },
 ];
+
+const LEGACY_TEMPLATE_ID_MAP: Record<string, ConcreteTemplateId> = {
+  'macbook-air-13': 'macbook-pro-14-m4',
+  'macbook-pro-14': 'macbook-pro-14-m4',
+  'imac-24': 'imac-24-m4',
+  'mac-mini': 'mac-mini-m4',
+};
 
 const TEMPLATE_IDS = TEMPLATES.map(template => template.id);
 
@@ -149,19 +148,21 @@ const hashHex = (value: string) =>
     .update(value)
     .digest('hex');
 
-const stableIndex = (seed: string, modulo: number) => {
-  const first32Bits = Number.parseInt(hashHex(seed).slice(0, 8), 16);
-  return first32Bits % modulo;
-};
+const stableUint32 = (seed: string) => Number.parseInt(hashHex(seed).slice(0, 8), 16);
+
+const stableIndex = (seed: string, modulo: number) => stableUint32(seed) % modulo;
 
 const stableId = (profileId: string, key: string) =>
-  hashHex(`chrome-power:${MANAGED_CHROMIUM_VERSION}:${profileId}:${key}`).slice(0, 32);
+  hashHex(`chrome-power:${MANAGED_CHROMIUM_VERSION}:${FINGERPRINT_ENGINE_VERSION}:${profileId}:${key}`).slice(0, 32);
 
 export const normalizeMacDeviceTemplateId = (
   templateId?: string | null,
 ): MacDeviceTemplateId => {
   if (!templateId) {
     return FINGERPRINT_TEMPLATE_AUTO_ID;
+  }
+  if (templateId in LEGACY_TEMPLATE_ID_MAP) {
+    return LEGACY_TEMPLATE_ID_MAP[templateId];
   }
   return MAC_DEVICE_TEMPLATE_OPTIONS.some(template => template.id === templateId)
     ? (templateId as MacDeviceTemplateId)
@@ -177,7 +178,7 @@ export const resolveMacDeviceTemplate = (
   if (normalizedTemplateId === FINGERPRINT_TEMPLATE_AUTO_ID) {
     templateId =
       TEMPLATE_IDS[
-        stableIndex(`template:${profileId}:${MANAGED_CHROMIUM_VERSION}`, TEMPLATE_IDS.length)
+        stableIndex(`template:${profileId}:${MANAGED_CHROMIUM_VERSION}:${FINGERPRINT_ENGINE_VERSION}`, TEMPLATE_IDS.length)
       ];
   } else {
     templateId = normalizedTemplateId as ConcreteTemplateId;
@@ -248,11 +249,14 @@ export const generateFingerprintSnapshot = (
   const seed = stableId(profileId, `snapshot:${template.id}`);
 
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
+    fingerprintEngineVersion: FINGERPRINT_ENGINE_VERSION,
     profileId,
     managedBrowserVersion: MANAGED_CHROMIUM_VERSION,
     requestedTemplateId: normalizedTemplateId,
     templateId: template.id,
+    templateConfidence: 'high',
+    nativePatchRequired: true,
     seed,
     ua: BASE_UA,
     uaCh: {
@@ -263,13 +267,17 @@ export const generateFingerprintSnapshot = (
       mobile: false,
       model: '',
       platform: 'macOS',
-      platformVersion: '26.5.0',
+      platformVersion: MACOS_PLATFORM_VERSION,
       uaFullVersion: MANAGED_CHROMIUM_VERSION,
+      fullVersion: MANAGED_CHROMIUM_VERSION,
       wow64: false,
     },
     locale: localeTimezone.locale,
     languages: localeTimezone.languages,
     timezone: localeTimezone.timezone,
+    platform: 'MacIntel',
+    hardwareConcurrency: template.hardwareConcurrency,
+    deviceMemory: template.deviceMemory,
     navigator: {
       platform: 'MacIntel',
       vendor: 'Google Inc.',
@@ -286,44 +294,81 @@ export const generateFingerprintSnapshot = (
       unmaskedRenderer: template.webglRenderer,
     },
     webgpu: {
-      mode: 'disabled',
-      reason: 'P2 masks WebGPU without rebuilding Chromium',
+      mode: 'native-masked-adapter-info',
+      vendor: template.webgpu.vendor,
+      architecture: template.webgpu.architecture,
+      device: template.webgpu.device,
+      description: template.webgpu.description,
+    },
+    noise: {
+      canvas: stableUint32(stableId(profileId, 'canvas:native')),
+      audio: stableUint32(stableId(profileId, 'audio:native')),
+      webgl: stableUint32(stableId(profileId, 'webgl:native')),
     },
     canvas: {
-      mode: 'stable-noise',
+      mode: 'stable-native-noise',
       seed: stableId(profileId, 'canvas'),
     },
     audio: {
-      mode: 'stable-noise',
+      mode: 'stable-native-noise',
       seed: stableId(profileId, 'audio'),
     },
     mediaDevices: createMediaDevices(profileId, template.mediaLabels),
+    networkConsistency: {
+      proxyRequired: true,
+      webrtcPolicy: 'disable_non_proxied_udp',
+      timezoneSource: 'snapshot',
+      localeSource: 'snapshot',
+    },
   };
 };
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
-export const isFingerprintSnapshot = (value: unknown): value is FingerprintSnapshot => {
+const isFingerprintSnapshotV2 = (value: unknown): value is FingerprintSnapshot => {
   if (!isObject(value)) {
     return false;
   }
   return (
-    value.schemaVersion === 1 &&
+    value.schemaVersion === 2 &&
+    value.fingerprintEngineVersion === FINGERPRINT_ENGINE_VERSION &&
     typeof value.profileId === 'string' &&
     value.managedBrowserVersion === MANAGED_CHROMIUM_VERSION &&
     typeof value.ua === 'string' &&
     typeof value.timezone === 'string' &&
+    typeof value.platform === 'string' &&
+    typeof value.hardwareConcurrency === 'number' &&
+    typeof value.deviceMemory === 'number' &&
     isObject(value.navigator) &&
     isObject(value.screen) &&
     isObject(value.webgl) &&
     isObject(value.webgpu) &&
+    isObject(value.noise) &&
     isObject(value.canvas) &&
     isObject(value.audio) &&
+    isObject(value.networkConsistency) &&
     Array.isArray(value.fonts) &&
     Array.isArray(value.mediaDevices)
   );
 };
+
+const migrateLegacySnapshot = (value: Record<string, unknown>): FingerprintSnapshot | null => {
+  if (value.schemaVersion !== 1 || typeof value.profileId !== 'string') {
+    return null;
+  }
+  return generateFingerprintSnapshot(
+    value.profileId,
+    typeof value.templateId === 'string'
+      ? value.templateId
+      : typeof value.requestedTemplateId === 'string'
+        ? value.requestedTemplateId
+        : undefined,
+  );
+};
+
+export const isFingerprintSnapshot = (value: unknown): value is FingerprintSnapshot =>
+  isFingerprintSnapshotV2(value);
 
 export const parseFingerprintSnapshot = (
   fingerprint?: string | null | unknown,
@@ -333,7 +378,10 @@ export const parseFingerprintSnapshot = (
   }
   try {
     const parsed = typeof fingerprint === 'string' ? JSON.parse(fingerprint) : fingerprint;
-    return isFingerprintSnapshot(parsed) ? parsed : null;
+    if (isFingerprintSnapshotV2(parsed)) {
+      return parsed;
+    }
+    return isObject(parsed) ? migrateLegacySnapshot(parsed) : null;
   } catch {
     return null;
   }

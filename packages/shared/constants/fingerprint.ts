@@ -13,23 +13,18 @@ export const MAC_DEVICE_TEMPLATE_OPTIONS: Array<{
     description: 'Stable macOS template selected from the profile id',
   },
   {
-    id: 'macbook-air-13',
-    name: 'MacBook Air 13',
-    description: 'Apple Silicon laptop profile with compact Retina display',
+    id: 'mac-mini-m4',
+    name: 'Mac mini M4',
+    description: 'High-confidence Apple M4 desktop profile with external display',
   },
   {
-    id: 'macbook-pro-14',
-    name: 'MacBook Pro 14',
-    description: 'Apple Silicon Pro laptop profile with high-DPI display',
+    id: 'macbook-pro-14-m4',
+    name: 'MacBook Pro 14 M4',
+    description: 'High-confidence Apple M4 laptop profile with Retina display',
   },
   {
-    id: 'imac-24',
-    name: 'iMac 24',
-    description: 'Apple Silicon desktop profile with built-in Retina display',
-  },
-  {
-    id: 'mac-mini',
-    name: 'Mac mini',
-    description: 'Apple Silicon desktop profile with external display',
+    id: 'imac-24-m4',
+    name: 'iMac 24 M4',
+    description: 'High-confidence Apple M4 desktop profile with built-in Retina display',
   },
 ];

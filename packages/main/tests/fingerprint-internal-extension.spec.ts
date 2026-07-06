@@ -17,7 +17,7 @@ describe('internal fingerprint extension', () => {
   });
 
   test('writes a profile-specific MV3 extension with embedded snapshot', () => {
-    const snapshot = generateFingerprintSnapshot('profile-alpha', 'mac-mini');
+    const snapshot = generateFingerprintSnapshot('profile-alpha', 'mac-mini-m4');
     const extensionPath = ensureInternalFingerprintExtension(tempDir, snapshot);
     const manifest = JSON.parse(readFileSync(join(extensionPath, 'manifest.json'), 'utf8'));
     const contentScript = readFileSync(join(extensionPath, 'content.js'), 'utf8');

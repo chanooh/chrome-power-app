@@ -24,12 +24,20 @@ describe('macOS fingerprint snapshot', () => {
   });
 
   test('uses a requested concrete macOS template', () => {
+    const snapshot = generateFingerprintSnapshot('profile-pro', 'macbook-pro-14-m4');
+
+    expect(snapshot.schemaVersion).toBe(2);
+    expect(snapshot.requestedTemplateId).toBe('macbook-pro-14-m4');
+    expect(snapshot.templateId).toBe('macbook-pro-14-m4');
+    expect(snapshot.nativePatchRequired).toBe(true);
+    expect(snapshot.navigator.hardwareConcurrency).toBe(10);
+    expect(snapshot.screen.width).toBe(1512);
+  });
+
+  test('migrates legacy template ids to v2 templates', () => {
     const snapshot = generateFingerprintSnapshot('profile-pro', 'macbook-pro-14');
 
-    expect(snapshot.requestedTemplateId).toBe('macbook-pro-14');
-    expect(snapshot.templateId).toBe('macbook-pro-14');
-    expect(snapshot.navigator.hardwareConcurrency).toBe(12);
-    expect(snapshot.screen.width).toBe(1512);
+    expect(snapshot.templateId).toBe('macbook-pro-14-m4');
   });
 
   test('parses only valid managed Chromium snapshots', () => {

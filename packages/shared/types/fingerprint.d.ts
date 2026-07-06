@@ -1,9 +1,8 @@
 export type MacDeviceTemplateId =
   | 'auto'
-  | 'macbook-air-13'
-  | 'macbook-pro-14'
-  | 'imac-24'
-  | 'mac-mini';
+  | 'mac-mini-m4'
+  | 'macbook-pro-14-m4'
+  | 'imac-24-m4';
 
 export type FingerprintDiagnosticStatus = 'pass' | 'warning' | 'fail';
 
@@ -30,6 +29,7 @@ export interface FingerprintUaHighEntropy {
   platform: string;
   platformVersion: string;
   uaFullVersion: string;
+  fullVersion: string;
   wow64: boolean;
 }
 
@@ -51,13 +51,16 @@ export interface FingerprintWebglSnapshot {
 }
 
 export interface FingerprintNoiseSnapshot {
-  mode: 'stable-noise';
+  mode: 'stable-native-noise';
   seed: string;
 }
 
 export interface FingerprintWebgpuSnapshot {
-  mode: 'disabled';
-  reason: string;
+  mode: 'native-masked-adapter-info';
+  vendor: string;
+  architecture: string;
+  device: string;
+  description: string;
 }
 
 export interface FingerprintMediaDeviceSnapshot {
@@ -68,25 +71,42 @@ export interface FingerprintMediaDeviceSnapshot {
 }
 
 export interface FingerprintSnapshot {
-  schemaVersion: 1;
+  schemaVersion: 2;
+  fingerprintEngineVersion: string;
   profileId: string;
   managedBrowserVersion: string;
   requestedTemplateId: MacDeviceTemplateId;
   templateId: Exclude<MacDeviceTemplateId, 'auto'>;
+  templateConfidence: 'high';
+  nativePatchRequired: boolean;
   seed: string;
   ua: string;
   uaCh: FingerprintUaHighEntropy;
   locale: string;
   languages: string[];
   timezone: string;
+  platform: 'MacIntel';
+  hardwareConcurrency: number;
+  deviceMemory: number;
   navigator: FingerprintNavigatorSnapshot;
   screen: FingerprintScreenSnapshot;
   fonts: string[];
   webgl: FingerprintWebglSnapshot;
   webgpu: FingerprintWebgpuSnapshot;
+  noise: {
+    canvas: number;
+    audio: number;
+    webgl: number;
+  };
   canvas: FingerprintNoiseSnapshot;
   audio: FingerprintNoiseSnapshot;
   mediaDevices: FingerprintMediaDeviceSnapshot[];
+  networkConsistency: {
+    proxyRequired: boolean;
+    webrtcPolicy: 'disable_non_proxied_udp';
+    timezoneSource: 'snapshot' | 'proxy';
+    localeSource: 'snapshot' | 'proxy';
+  };
 }
 
 export interface MacDeviceTemplate {
@@ -98,6 +118,12 @@ export interface MacDeviceTemplate {
   hardwareConcurrency: number;
   deviceMemory: number;
   webglRenderer: string;
+  webgpu: {
+    vendor: string;
+    architecture: string;
+    device: string;
+    description: string;
+  };
   mediaLabels: {
     microphone: string;
     camera: string;
