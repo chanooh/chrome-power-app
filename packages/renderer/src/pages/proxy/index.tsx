@@ -126,7 +126,7 @@ const Proxy = () => {
       dataIndex: 'host',
       key: 'host',
       render: (_, recorder) => (
-        <Space size={12}>{recorder.proxy && recorder.proxy.split(':')[0]}</Space>
+        <Space size={12}>{recorder.host || (recorder.proxy && recorder.proxy.split(':')[0])}</Space>
       ),
     },
     {
@@ -236,7 +236,10 @@ const Proxy = () => {
           setSelectedRow(recorder);
           setUpdateCheckResult('');
           setUpdateChecking(false);
-          const [host, port, username, password] = recorder?.proxy?.split(':') || [];
+          const [legacyHost, legacyPort, legacyUsername] = recorder?.proxy?.split(':') || [];
+          const host = recorder.host || legacyHost;
+          const port = String(recorder.port || legacyPort || '');
+          const username = recorder.username || legacyUsername;
           if (form) {
             form.resetFields();
             form.setFieldsValue({
@@ -245,7 +248,7 @@ const Proxy = () => {
               host: host,
               port: port,
               username: username,
-              password: password,
+              password: '',
             });
           } else {
             setFormValue({
@@ -254,7 +257,7 @@ const Proxy = () => {
               ip: host,
               port: port,
               username: username,
-              password: password,
+              password: '',
             });
           }
           setUpdateModalVisible(true);
@@ -420,10 +423,10 @@ const Proxy = () => {
         id: selectedRow?.id,
         proxy_type: values.proxy_type,
         ip_checker: values.ip_checker,
-        // host: values.host,
-        proxy:
-          `${values.host}:${values.port}` +
-          (values.username ? `:${values.username}:${values.password}` : ''),
+        host: values.host,
+        port: values.port,
+        username: values.username,
+        password: values.password,
         remark: values.remark,
       };
       const result = await ProxyBridge?.update(proxy.id!, proxy);
@@ -448,9 +451,12 @@ const Proxy = () => {
         proxy_type: values.proxy_type,
         ip_checker: values.ip_checker,
         host: values.host,
+        port: values.port,
+        username: values.username,
+        password: values.password,
         proxy:
           `${values.host}:${values.port}` +
-          (values.username ? `:${values.username}:${values.password}` : ''),
+          (values.username && values.password ? `:${values.username}:${values.password}` : ''),
       });
       setUpdateCheckResult(JSON.stringify(testResult));
       setUpdateChecking(false);

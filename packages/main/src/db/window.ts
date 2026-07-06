@@ -8,9 +8,17 @@ import {
   parseFingerprintSnapshot,
   serializeFingerprintSnapshot,
 } from '../fingerprint/snapshot';
+import {maskProxyValue} from '../proxy/secure-proxy';
+
+const sanitizeWindowProxy = <T extends DB.Window | undefined>(windowData: T): T => {
+  if (windowData?.proxy) {
+    windowData.proxy = maskProxyValue(windowData.proxy);
+  }
+  return windowData;
+};
 
 const all = async () => {
-  return await db('window')
+  const windows = await db('window')
     .select(
       'window.id',
       'window.group_id',
@@ -36,10 +44,11 @@ const all = async () => {
     .leftJoin('proxy', 'window.proxy_id', '=', 'proxy.id')
     .where('window.status', '>', 0)
     .orderBy('window.created_at', 'desc');
+  return windows.map(sanitizeWindowProxy);
 };
 
 const getOpenedWindows = async () => {
-  return await db('window')
+  const windows = await db('window')
     .select(
       'window.id',
       'window.group_id',
@@ -67,6 +76,7 @@ const getOpenedWindows = async () => {
     .leftJoin('proxy', 'window.proxy_id', '=', 'proxy.id')
     .where('window.status', '>', 1)
     .orderBy('window.created_at', 'desc');
+  return windows.map(sanitizeWindowProxy);
 };
 
 const find = async (params: DB.Window) => {
@@ -89,6 +99,8 @@ const getById = async (id: number) => {
     .leftJoin('group', 'window.group_id', '=', 'group.id')
     .leftJoin('proxy', 'window.proxy_id', '=', 'proxy.id')
     .first();
+  if (!windowData) return windowData;
+  sanitizeWindowProxy(windowData);
 
   if (windowData.tags) {
     // 分割 tags 字符串
@@ -120,6 +132,8 @@ const getByPid = async (pid: number) => {
     .leftJoin('group', 'window.group_id', '=', 'group.id')
     .leftJoin('proxy', 'window.proxy_id', '=', 'proxy.id')
     .first();
+  if (!windowData) return windowData;
+  sanitizeWindowProxy(windowData);
 
   if (windowData && windowData.tags) {
     // 分割 tags 字符串

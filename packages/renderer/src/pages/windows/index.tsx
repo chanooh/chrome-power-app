@@ -33,8 +33,12 @@ import {
   // ExportOutlined,
   ExclamationCircleFilled,
   ExportOutlined,
+  ImportOutlined,
+  DatabaseOutlined,
+  FolderOpenOutlined,
 } from '@ant-design/icons';
 import type {DB} from '../../../../shared/types/db';
+import type {OrphanProfile, ProfileStorageStatus} from '../../../../shared/types/profile';
 import {CommonBridge, GroupBridge, ProxyBridge, TagBridge, WindowBridge} from '#preload';
 import type {SearchProps} from 'antd/es/input';
 import {containsKeyword} from '/@/utils/str';
@@ -61,6 +65,11 @@ const Windows = () => {
   const [proxySettingVisible, setProxySettingVisible] = useState(false);
   const [proxies, setProxies] = useState<DB.Proxy[]>([]);
   const [selectedProxy, setSelectedProxy] = useState<number>();
+  const [profileStatusVisible, setProfileStatusVisible] = useState(false);
+  const [profileStatus, setProfileStatus] = useState<ProfileStorageStatus>();
+  const [orphanModalVisible, setOrphanModalVisible] = useState(false);
+  const [orphanProfiles, setOrphanProfiles] = useState<OrphanProfile[]>([]);
+  const [profileActionLoading, setProfileActionLoading] = useState(false);
   const navigate = useNavigate();
 
   const moreActionDropdownItems: MenuProps['items'] = [
@@ -73,6 +82,16 @@ const Windows = () => {
       key: 'export',
       label: t('window_export'),
       icon: <ExportOutlined />,
+    },
+    {
+      key: 'restore-profile',
+      label: 'Restore profile',
+      icon: <ImportOutlined />,
+    },
+    {
+      key: 'scan-orphans',
+      label: 'Scan orphan profiles',
+      icon: <FolderOpenOutlined />,
     },
     {
       type: 'divider',
@@ -94,6 +113,16 @@ const Windows = () => {
       key: 'proxy',
       label: t('window_proxy_setting'),
       icon: <GlobalOutlined />,
+    },
+    {
+      key: 'backup-profile',
+      label: 'Backup profile',
+      icon: <ExportOutlined />,
+    },
+    {
+      key: 'profile-status',
+      label: 'Profile status',
+      icon: <DatabaseOutlined />,
     },
     // {
     //   key: 'set-cookie',
@@ -337,6 +366,12 @@ const Windows = () => {
       case 'export':
         exportWindows();
         break;
+      case 'restore-profile':
+        restoreProfile();
+        break;
+      case 'scan-orphans':
+        scanOrphanProfiles();
+        break;
       default:
         break;
     }
@@ -472,13 +507,87 @@ const Windows = () => {
     const ids = selectedRow ? [selectedRow.id!] : selectedRowKeys;
     try {
       setLoading(true);
-      await WindowBridge?.batchDelete(ids);
+      const result = await WindowBridge?.batchDelete(ids);
+      if (result?.success === false) {
+        messageApi.error(result.message || 'Failed to delete');
+        setLoading(false);
+        return;
+      }
       setDeleteModalVisible(false);
       await fetchWindowData();
       messageApi.success('Deleted successfully');
       setLoading(false);
     } catch (error) {
       messageApi.error('Failed to delete');
+    }
+  };
+
+  const formatBytes = (bytes?: number) => {
+    if (!bytes) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let size = bytes;
+    let unit = 0;
+    while (size >= 1024 && unit < units.length - 1) {
+      size /= 1024;
+      unit++;
+    }
+    return `${size.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
+  };
+
+  const backupProfile = async (window: DB.Window) => {
+    if (!window.id) return;
+    setProfileActionLoading(true);
+    try {
+      const result = await WindowBridge.backupProfile(window.id);
+      messageApi[result.success ? 'success' : 'error'](result.message);
+    } finally {
+      setProfileActionLoading(false);
+    }
+  };
+
+  const showProfileStatus = async (window: DB.Window) => {
+    if (!window.id) return;
+    setProfileActionLoading(true);
+    try {
+      const status = await WindowBridge.getProfileStorageStatus(window.id);
+      setProfileStatus(status);
+      setProfileStatusVisible(true);
+    } catch (error) {
+      messageApi.error((error as Error).message);
+    } finally {
+      setProfileActionLoading(false);
+    }
+  };
+
+  const restoreProfile = async () => {
+    setProfileActionLoading(true);
+    try {
+      const result = await WindowBridge.restoreProfile();
+      messageApi[result.success ? 'success' : 'error'](result.message);
+      if (result.success) {
+        await fetchWindowData();
+      }
+    } finally {
+      setProfileActionLoading(false);
+    }
+  };
+
+  const scanOrphanProfiles = async () => {
+    setProfileActionLoading(true);
+    try {
+      const profiles = await WindowBridge.scanOrphanProfiles();
+      setOrphanProfiles(profiles);
+      setOrphanModalVisible(true);
+    } finally {
+      setProfileActionLoading(false);
+    }
+  };
+
+  const trashOrphanProfile = async (profileId: string) => {
+    const result = await WindowBridge.trashOrphanProfile(profileId);
+    messageApi[result.success ? 'success' : 'error'](result.message);
+    if (result.success) {
+      setOrphanProfiles(current => current.filter(profile => profile.profileId !== profileId));
     }
   };
 
@@ -507,6 +616,12 @@ const Windows = () => {
         setSelectedRow(recorder);
         setSelectedProxy(recorder.proxy_id ?? undefined);
         setProxySettingVisible(true);
+        break;
+      case 'backup-profile':
+        await backupProfile(recorder);
+        break;
+      case 'profile-status':
+        await showProfileStatus(recorder);
         break;
       case 'set-cookie':
         setSelectedRow(recorder);
@@ -616,6 +731,7 @@ const Windows = () => {
           >
             <Button
               type="default"
+              loading={profileActionLoading}
               className="rotate-90 font-black"
               icon={<MoreOutlined />}
             ></Button>
@@ -664,10 +780,64 @@ const Windows = () => {
       >
         <div className="pl-[36px]">
           <div>
-            The current operation will keep the local cache, if you want to delete the local cache,
-            please go to the cache directory to delete manually.
+            The selected closed profiles will be moved to Trash, and running profiles will not be
+            deleted.
           </div>
         </div>
+      </Modal>
+      <Modal
+        title="Profile Status"
+        open={profileStatusVisible}
+        centered
+        footer={null}
+        onCancel={() => setProfileStatusVisible(false)}
+      >
+        {profileStatus && (
+          <Space direction="vertical" className="w-full">
+            <Text code>{profileStatus.profileId}</Text>
+            <Text copyable={{text: profileStatus.path}} ellipsis={{tooltip: profileStatus.path}}>
+              {profileStatus.path}
+            </Text>
+            <Text>Exists: {profileStatus.exists ? 'Yes' : 'No'}</Text>
+            <Text>Running: {profileStatus.running ? 'Yes' : 'No'}</Text>
+            <Text>Size: {formatBytes(profileStatus.sizeBytes)}</Text>
+            <Text>Permissions: {profileStatus.permissions || '-'}</Text>
+            <Text>Health: {profileStatus.health}</Text>
+            {profileStatus.issues.map(issue => (
+              <Text key={issue} type="warning">
+                {issue}
+              </Text>
+            ))}
+          </Space>
+        )}
+      </Modal>
+      <Modal
+        title="Orphan Profiles"
+        open={orphanModalVisible}
+        centered
+        footer={null}
+        onCancel={() => setOrphanModalVisible(false)}
+        width={720}
+      >
+        <Space direction="vertical" className="w-full">
+          {orphanProfiles.length === 0 && <Text>No orphan profiles found.</Text>}
+          {orphanProfiles.map(profile => (
+            <Row key={profile.profileId} justify="space-between" align="middle">
+              <Col span={14}>
+                <Space direction="vertical" size={0}>
+                  <Text code>{profile.profileId}</Text>
+                  <Text ellipsis={{tooltip: profile.path}}>{profile.path}</Text>
+                </Space>
+              </Col>
+              <Col span={4}>{formatBytes(profile.sizeBytes)}</Col>
+              <Col span={4}>
+                <Button danger size="small" onClick={() => trashOrphanProfile(profile.profileId)}>
+                  Trash
+                </Button>
+              </Col>
+            </Row>
+          ))}
+        </Space>
       </Modal>
       <Modal
         open={proxySettingVisible}

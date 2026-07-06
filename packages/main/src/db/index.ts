@@ -5,8 +5,8 @@ import {DB_CONFIG} from '../constants';
 import {WindowDB} from './window';
 import {resetWindowStatus} from '../fingerprint';
 import {join} from 'path';
+import {ProxyDB} from './proxy';
 
-// import {ProxyDB} from './proxy';
 // import {GroupDB} from './group';
 // import {TagDB} from './tag';
 
@@ -38,6 +38,7 @@ const initializeDatabase = async () => {
     await db.migrate.latest({
       directory: app.isPackaged ? join(process.resourcesPath, 'app/migrations') : './migrations',
     });
+    await ProxyDB.migrateLegacyCredentials();
 
     // 初始化窗口状态
     await initWindowStatus();

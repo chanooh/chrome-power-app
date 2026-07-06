@@ -33,7 +33,7 @@ export const initProxyService = () => {
 
   ipcMain.handle('proxy-test', async (_, testParams: number | DB.Proxy) => {
     if (typeof testParams === 'number') {
-      const proxy = await ProxyDB.getById(testParams);
+      const proxy = await ProxyDB.getByIdForConnection(testParams);
       return await testProxy(proxy);
     } else {
       return await testProxy(testParams);

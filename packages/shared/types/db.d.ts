@@ -38,13 +38,20 @@ export namespace DB {
     ip?: string;
     proxy?: string;
     host?: string;
+    port?: string | number;
+    username?: string;
+    password?: string;
+    password_encrypted?: string | null;
     proxy_type?: string;
     ip_checker?: 'ip2location' | 'geoip';
     ip_country?: string;
     check_result?: string;
     checking?: boolean;
     remark?: string;
+    checked_at?: string;
     usageCount?: number;
+    hasPassword?: boolean;
+    credential_status?: 'encrypted' | 'none' | 'legacy' | 'unavailable';
     // ... other properties
   }
 

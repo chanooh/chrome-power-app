@@ -1,4 +1,4 @@
-import {ipcMain} from 'electron';
+import {BrowserWindow, dialog, ipcMain} from 'electron';
 import {readFileSync} from 'fs';
 import {txtToJSON} from '../utils/txt-to-json';
 import * as XLSX from 'xlsx';
@@ -16,7 +16,35 @@ import {ExtensionDB} from '../db/extension';
 import * as ExcelJS from 'exceljs';
 import {parseFingerprintSnapshot} from '../fingerprint/snapshot';
 import {runFingerprintDiagnostics} from '../fingerprint/diagnostics';
+import {
+  getProfileStorageStatus,
+  scanOrphanProfiles,
+  trashProfileDirectory,
+} from '../profile/storage';
+import {backupProfileToArchive, restoreProfileFromArchive} from '../profile/backup';
+
 const logger = createLogger(SERVICE_LOGGER_LABEL);
+
+const trashProfilesForWindows = async (ids: number[]) => {
+  const windows = await Promise.all(ids.map(id => WindowDB.getById(id)));
+  const running = windows.filter(window => window?.status === 2);
+  if (running.length) {
+    return {
+      success: false,
+      message: `Close running profiles before deleting: ${running.map(window => window.id).join(', ')}`,
+    };
+  }
+
+  for (const window of windows) {
+    if (window?.profile_id) {
+      await trashProfileDirectory(window.profile_id);
+    }
+  }
+  return {success: true, message: 'Profiles moved to Trash.'};
+};
+
+const getDialogWindow = () => BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+
 export const initWindowService = () => {
   logger.info('init window service...');
   ipcMain.handle('window-import', async (_, filePath: string) => {
@@ -53,14 +81,20 @@ export const initWindowService = () => {
   });
 
   ipcMain.handle('window-delete', async (_, id: number) => {
+    const trashed = await trashProfilesForWindows([id]);
+    if (!trashed.success) return trashed;
     await ExtensionDB.deleteWindowReleted(id);
     return await WindowDB.remove(id);
   });
   ipcMain.handle('window-batchClear', async (_, ids: number[]) => {
+    const trashed = await trashProfilesForWindows(ids);
+    if (!trashed.success) return trashed;
     await ExtensionDB.deleteWindowReleted(ids);
     return await WindowDB.batchClear(ids);
   });
   ipcMain.handle('window-batchDelete', async (_, ids: number[]) => {
+    const trashed = await trashProfilesForWindows(ids);
+    if (!trashed.success) return trashed;
     await ExtensionDB.deleteWindowReleted(ids);
     return await WindowDB.batchRemove(ids);
   });
@@ -114,6 +148,69 @@ export const initWindowService = () => {
       throw new Error(`Window ${windowId} not found`);
     }
     return await runFingerprintDiagnostics(window);
+  });
+
+  ipcMain.handle('window-profile-storage-status', async (_, windowId: number) => {
+    const window = await WindowDB.getById(windowId);
+    if (!window) {
+      throw new Error(`Window ${windowId} not found`);
+    }
+    return getProfileStorageStatus(window);
+  });
+
+  ipcMain.handle('window-profile-backup', async (_, windowId: number) => {
+    const window = await WindowDB.getById(windowId);
+    if (!window) {
+      return {success: false, message: `Window ${windowId} not found.`};
+    }
+    const dialogWindow = getDialogWindow();
+    const saveOptions = {
+      title: 'Backup Profile',
+      defaultPath: `${window.profile_id}.chrome-power-profile.zip`,
+      filters: [{name: 'Chrome Power Profile', extensions: ['zip']}],
+    };
+    const {canceled, filePath} = dialogWindow
+      ? await dialog.showSaveDialog(dialogWindow, saveOptions)
+      : await dialog.showSaveDialog(saveOptions);
+    if (canceled || !filePath) {
+      return {success: false, message: 'Backup canceled.'};
+    }
+    return await backupProfileToArchive(windowId, filePath);
+  });
+
+  ipcMain.handle('window-profile-restore', async (_, archivePath?: string) => {
+    let selectedPath = archivePath;
+    if (!selectedPath) {
+      const dialogWindow = getDialogWindow();
+      const openOptions = {
+        title: 'Restore Profile',
+        properties: ['openFile'],
+        filters: [{name: 'Chrome Power Profile', extensions: ['zip']}],
+      } as Electron.OpenDialogOptions;
+      const {canceled, filePaths} = dialogWindow
+        ? await dialog.showOpenDialog(dialogWindow, openOptions)
+        : await dialog.showOpenDialog(openOptions);
+      if (canceled || !filePaths[0]) {
+        return {success: false, message: 'Restore canceled.'};
+      }
+      selectedPath = filePaths[0];
+    }
+    return await restoreProfileFromArchive(selectedPath);
+  });
+
+  ipcMain.handle('window-profile-scan-orphans', async () => {
+    const windows = await WindowDB.all();
+    return scanOrphanProfiles(windows.map(window => window.profile_id!).filter(Boolean));
+  });
+
+  ipcMain.handle('window-profile-trash-orphan', async (_, profileId: string) => {
+    const rows = await WindowDB.find({profile_id: profileId});
+    const active = rows.some(row => row.status && row.status > 0);
+    if (active) {
+      return {success: false, message: `Profile ${profileId} is still attached to a window.`};
+    }
+    await trashProfileDirectory(profileId);
+    return {success: true, message: 'Orphan profile moved to Trash.'};
   });
 
   ipcMain.handle('window-getById', async (_, id: number) => {

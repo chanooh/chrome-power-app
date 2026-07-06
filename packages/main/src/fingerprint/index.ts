@@ -21,7 +21,6 @@ import {MANAGED_CHROMIUM_VERSION, resolveManagedBrowserCore} from '../browser-co
 import {bridgeMessageToUI, getClientPort, getMainWindow} from '../mainWindow';
 import {Mutex} from 'async-mutex';
 // import {presetCookie} from '../puppeteer/helpers';
-import {existsSync, mkdirSync} from 'fs';
 import api from '../../../shared/api/api';
 import {ExtensionDB} from '../db/extension';
 import {getPort} from '../server';
@@ -29,6 +28,7 @@ import type {SettingOptions} from '../../../shared/types/common';
 import {buildBrowserLaunchParameters} from './launch-params';
 import {stopFingerprintCdpSession} from './cdp';
 import {serializeFingerprintSnapshot} from './snapshot';
+import {ensureManagedProfileDirectory} from '../profile/storage';
 
 const mutex = new Mutex();
 
@@ -196,7 +196,7 @@ export async function openFingerprintWindow(id: number, headless = false) {
     }
 
     const extensionData = await ExtensionDB.getExtensionsByWindowId(id);
-    const proxyData = await ProxyDB.getById(windowData.proxy_id);
+    const proxyData = await ProxyDB.getByIdForConnection(windowData.proxy_id);
     const proxyType = proxyData?.proxy_type?.toLowerCase();
     const settings = getSettings();
 
@@ -227,29 +227,17 @@ export async function openFingerprintWindow(id: number, headless = false) {
     }
 
     const win = BrowserWindow.getAllWindows()[0];
-    const windowDataDir = join(
+    let windowDataDir = join(
       cachePath,
       ...launchTarget.profileDirectorySegments,
       windowData.profile_id,
     );
-
-    // 确保目录存在并设置正确权限
-    if (!existsSync(windowDataDir)) {
-      try {
-        mkdirSync(windowDataDir, {recursive: true, mode: 0o755});
-      } catch (error) {
-        logger.error(`Failed to create directory: ${error}`);
-        return null;
-      }
-    }
-
-    // 确保目录有正确的权限
     const isMac = process.platform === 'darwin';
-    if (isMac) {
+    if (launchTarget.managed) {
       try {
-        execSync(`chmod -R 755 "${windowDataDir}"`);
+        windowDataDir = ensureManagedProfileDirectory(windowData.profile_id);
       } catch (error) {
-        logger.error(`Failed to set permissions: ${error}`);
+        logger.error(`Failed to prepare managed profile directory: ${error}`);
         return null;
       }
     }

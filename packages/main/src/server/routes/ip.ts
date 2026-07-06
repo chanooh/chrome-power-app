@@ -84,7 +84,7 @@ router.get('/ping', async (req, res) => {
     windowData = await WindowDB.getById(Number(windowId));
     let proxyData: DB.Proxy = {};
     if (windowData.proxy_id) {
-      proxyData = await ProxyDB.getById(windowData.proxy_id);
+      proxyData = await ProxyDB.getByIdForConnection(windowData.proxy_id);
       pings = await testProxy(proxyData);
     } else {
       pings = await testProxy(proxyData);

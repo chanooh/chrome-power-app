@@ -1,6 +1,12 @@
 import type {IpcRendererEvent} from 'electron';
 import {ipcRenderer} from 'electron';
 import type {DB, SafeAny} from '../../../shared/types/db';
+import type {
+  OrphanProfile,
+  ProfileBackupResult,
+  ProfileRestoreResult,
+  ProfileStorageStatus,
+} from '../../../shared/types/profile';
 
 export const WindowBridge = {
   async import(file: string) {
@@ -43,6 +49,26 @@ export const WindowBridge = {
   },
   async getFingerprintDiagnostics(windowId: number) {
     const result = await ipcRenderer.invoke('window-fingerprint-diagnostics', windowId);
+    return result;
+  },
+  async getProfileStorageStatus(windowId: number): Promise<ProfileStorageStatus> {
+    const result = await ipcRenderer.invoke('window-profile-storage-status', windowId);
+    return result;
+  },
+  async backupProfile(windowId: number): Promise<ProfileBackupResult> {
+    const result = await ipcRenderer.invoke('window-profile-backup', windowId);
+    return result;
+  },
+  async restoreProfile(archivePath?: string): Promise<ProfileRestoreResult> {
+    const result = await ipcRenderer.invoke('window-profile-restore', archivePath);
+    return result;
+  },
+  async scanOrphanProfiles(): Promise<OrphanProfile[]> {
+    const result = await ipcRenderer.invoke('window-profile-scan-orphans');
+    return result;
+  },
+  async trashOrphanProfile(profileId: string) {
+    const result = await ipcRenderer.invoke('window-profile-trash-orphan', profileId);
     return result;
   },
   async getById(id: number) {

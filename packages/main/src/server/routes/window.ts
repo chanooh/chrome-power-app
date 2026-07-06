@@ -19,7 +19,7 @@ router.get('/info', async (req, res) => {
     windowData = await WindowDB.getById(Number(windowId));
     let proxyData: DB.Proxy = {};
     if (windowData.proxy_id) {
-      proxyData = await ProxyDB.getById(windowData.proxy_id);
+      proxyData = await ProxyDB.getByIdForConnection(windowData.proxy_id);
     }
     ipInfo = await getProxyInfo(proxyData);
   } catch (error) {

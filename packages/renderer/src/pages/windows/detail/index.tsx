@@ -1,5 +1,5 @@
 import type {TabsProps} from 'antd';
-import {Card, Tabs} from 'antd';
+import {Button, Card, Modal, Space, Tabs, Typography, message} from 'antd';
 import './index.css';
 import WindowEditForm from '../components/edit-form';
 import WindowImportForm from '../components/import-form';
@@ -10,6 +10,9 @@ import {WindowBridge} from '#preload';
 import FingerprintInfo from '../components/fingerprint-info';
 import WindowDetailFooter from '../components/edit-footer';
 import {useTranslation} from 'react-i18next';
+import type {ProfileStorageStatus} from '../../../../../shared/types/profile';
+
+const {Text} = Typography;
 
 const WindowDetailTabs = ({
   formValue,
@@ -63,6 +66,9 @@ const WindowDetail = () => {
   const [searchParams] = useSearchParams();
   const [fingerprints, setFingerprints] = useState<SafeAny>(new Object());
   const [loading, setLoading] = useState(false);
+  const [profileStatus, setProfileStatus] = useState<ProfileStorageStatus>();
+  const [profileStatusVisible, setProfileStatusVisible] = useState(false);
+  const [messageApi, contextHolder] = message.useMessage();
 
   useEffect(() => {
     initFormValue();
@@ -115,21 +121,53 @@ const WindowDetail = () => {
     // setFormValue(data);
   };
 
+  const formatBytes = (bytes?: number) => {
+    if (!bytes) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let size = bytes;
+    let unit = 0;
+    while (size >= 1024 && unit < units.length - 1) {
+      size /= 1024;
+      unit++;
+    }
+    return `${size.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
+  };
+
+  const backupProfile = async () => {
+    if (!formValue.id) return;
+    const result = await WindowBridge.backupProfile(formValue.id);
+    messageApi[result.success ? 'success' : 'error'](result.message);
+  };
+
+  const showProfileStatus = async () => {
+    if (!formValue.id) return;
+    const status = await WindowBridge.getProfileStorageStatus(formValue.id);
+    setProfileStatus(status);
+    setProfileStatusVisible(true);
+  };
+
   return (
     <>
+      {contextHolder}
       <Card className="window-detail-card">
         {searchParams.get('id') ? (
-          <div className="flex w-full mt-4">
-            <WindowEditForm
-              loading={loading}
-              formValue={formValue}
-              formChangeCallback={formValueChangeCallback}
-            ></WindowEditForm>
-            <FingerprintInfo
-              fingerprints={fingerprints}
-              windowId={formValue.id}
-            />
-          </div>
+          <>
+            <Space className="mb-3">
+              <Button onClick={showProfileStatus}>Profile status</Button>
+              <Button onClick={backupProfile}>Backup profile</Button>
+            </Space>
+            <div className="flex w-full mt-4">
+              <WindowEditForm
+                loading={loading}
+                formValue={formValue}
+                formChangeCallback={formValueChangeCallback}
+              ></WindowEditForm>
+              <FingerprintInfo
+                fingerprints={fingerprints}
+                windowId={formValue.id}
+              />
+            </div>
+          </>
         ) : (
           <WindowDetailTabs
             formValue={formValue}
@@ -145,6 +183,32 @@ const WindowDetail = () => {
         formValue={formValue}
         fingerprints={fingerprints}
       />
+      <Modal
+        title="Profile Status"
+        open={profileStatusVisible}
+        centered
+        footer={null}
+        onCancel={() => setProfileStatusVisible(false)}
+      >
+        {profileStatus && (
+          <Space direction="vertical" className="w-full">
+            <Text code>{profileStatus.profileId}</Text>
+            <Text copyable={{text: profileStatus.path}} ellipsis={{tooltip: profileStatus.path}}>
+              {profileStatus.path}
+            </Text>
+            <Text>Exists: {profileStatus.exists ? 'Yes' : 'No'}</Text>
+            <Text>Running: {profileStatus.running ? 'Yes' : 'No'}</Text>
+            <Text>Size: {formatBytes(profileStatus.sizeBytes)}</Text>
+            <Text>Permissions: {profileStatus.permissions || '-'}</Text>
+            <Text>Health: {profileStatus.health}</Text>
+            {profileStatus.issues.map(issue => (
+              <Text key={issue} type="warning">
+                {issue}
+              </Text>
+            ))}
+          </Space>
+        )}
+      </Modal>
     </>
   );
 };
