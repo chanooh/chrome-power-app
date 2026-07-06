@@ -133,6 +133,9 @@ export const readProfileBackupManifest = (extractedDir: string): ProfileBackupMa
   return manifest;
 };
 
+export const hasActiveProfileConflict = (rows: DB.Window[]) =>
+  rows.some(row => (row.status ?? 1) > 0);
+
 export const restoreProfileFromArchive = async (
   archivePath: string,
 ): Promise<ProfileRestoreResult> => {
@@ -151,7 +154,7 @@ export const restoreProfileFromArchive = async (
     }
 
     const existingRows = await WindowDB.find({profile_id: manifest.profileId});
-    if (existingRows.length > 0) {
+    if (hasActiveProfileConflict(existingRows)) {
       return {
         success: false,
         message: `Profile ${manifest.profileId} already exists locally.`,

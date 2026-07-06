@@ -91,4 +91,12 @@ describe('profile storage', () => {
     expect(JSON.stringify(manifest)).not.toContain('secret');
     expect(manifest.proxy?.proxy).toBe('127.0.0.1:8080:user:******');
   });
+
+  test('allows restore when only soft-deleted rows share the profile id', async () => {
+    const {hasActiveProfileConflict} = await import('../src/profile/backup');
+
+    expect(hasActiveProfileConflict([{id: 1, profile_id: 'profile-alpha', status: 0}])).toBe(false);
+    expect(hasActiveProfileConflict([{id: 2, profile_id: 'profile-alpha', status: 1}])).toBe(true);
+    expect(hasActiveProfileConflict([{id: 3, profile_id: 'profile-alpha'}])).toBe(true);
+  });
 });
