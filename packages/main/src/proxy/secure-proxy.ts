@@ -100,9 +100,10 @@ export const normalizeProxyForStorage = (
       : undefined;
   const fromProxyString = parseProxyString(proxy.proxy);
   const endpoint = fromFields || fromProxyString;
+  const {password: _plainPassword, password_encrypted: _inputEncrypted, ...storageProxy} = proxy;
 
   if (!endpoint) {
-    return proxy;
+    return storageProxy;
   }
 
   const existingEndpoint = existing ? getStoredProxyEndpoint(existing) : undefined;
@@ -117,11 +118,10 @@ export const normalizeProxyForStorage = (
     : encryptProxyPassword(endpoint.password);
 
   return {
-    ...proxy,
+    ...storageProxy,
     host: endpoint.host,
     port: endpoint.port,
     username: endpoint.username || undefined,
-    password: undefined,
     password_encrypted: passwordEncrypted,
     proxy: maskProxyEndpoint({
       ...endpoint,

@@ -25,6 +25,7 @@ describe('secure proxy credentials', () => {
 
     expect(stored.proxy).toBe('127.0.0.1:8080:user:******');
     expect(stored.password_encrypted).toBeTruthy();
+    expect(Object.prototype.hasOwnProperty.call(stored, 'password')).toBe(false);
     expect(JSON.stringify(publicProxy)).not.toContain('secret');
     expect(JSON.stringify(publicProxy)).not.toContain('password_encrypted');
     expect(connectionProxy.proxy).toBe('127.0.0.1:8080:user:secret');
