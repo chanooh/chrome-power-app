@@ -259,8 +259,19 @@ const Rpa = () => {
         steps: [...current.steps, ...steps],
       }),
     );
+    setRecorderEvents([]);
+    setRecorderSession(undefined);
     setRecorderOpen(false);
     messageApi.success(`${steps.length} steps appended`);
+  };
+
+  const clearRecorderEvents = () => {
+    if (recorderSession) {
+      messageApi.warning('Stop the recorder before clearing events');
+      return;
+    }
+    setRecorderEvents([]);
+    messageApi.success('Recorder events cleared');
   };
 
   const taskColumns = [
@@ -533,6 +544,9 @@ const Rpa = () => {
             <Button disabled={!!recorderSession} type="primary" onClick={startRecorder}>
               Start
             </Button>
+            <Button disabled={!!recorderSession || recorderEvents.length === 0} onClick={clearRecorderEvents}>
+              Clear
+            </Button>
             <Button onClick={appendRecorderSteps}>
               Append steps
             </Button>
@@ -548,6 +562,13 @@ const Rpa = () => {
             onChange={setRecorderWindowId}
           />
           {recorderSession && <Alert type="warning" showIcon message="Recording is active in the selected profile." />}
+          {!recorderSession && recorderEvents.length > 0 && (
+            <Alert
+              type="info"
+              showIcon
+              message="Click Append steps to add these events to the current Flow JSON, or Clear to discard and record again."
+            />
+          )}
           <Table
             rowKey="timestamp"
             size="small"

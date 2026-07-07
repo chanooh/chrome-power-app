@@ -39,7 +39,6 @@ export const SELECTOR_STEP_TYPES = new Set([
   'hover',
   'extractText',
   'extractAttribute',
-  'assertText',
 ]);
 
 export const SENSITIVE_INPUT_PATTERN =

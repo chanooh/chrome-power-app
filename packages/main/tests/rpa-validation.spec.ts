@@ -48,6 +48,12 @@ describe('rpa validation', () => {
     expect(result.issues.some(issue => issue.message.includes('manualConfirm'))).toBe(true);
   });
 
+  test('allows assertText without a selector to check the whole page', () => {
+    const result = validateRpaTask(baseTask([{id: 'assert-page', type: 'assertText', expected: 'Welcome'}]));
+
+    expect(result.valid).toBe(true);
+  });
+
   test('rejects duplicate step ids and invalid variable references', () => {
     const result = validateRpaTask(
       baseTask([
