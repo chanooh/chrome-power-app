@@ -29,6 +29,8 @@ export const RPA_STEP_TYPES = new Set([
   'manualConfirm',
 ]);
 
+export const RPA_SESSION_MODES = new Set(['keepExisting', 'cleanPages', 'taskUrlOnly']);
+
 export const SELECTOR_STEP_TYPES = new Set([
   'waitForSelector',
   'click',
@@ -149,6 +151,9 @@ export const validateRpaTask = (task: Partial<RpaTask>): RpaValidationResult => 
   }
   if (task.defaultTimeoutMs !== undefined && task.defaultTimeoutMs < 100) {
     push(issues, 'defaultTimeoutMs', 'Default timeout must be at least 100ms.');
+  }
+  if (task.sessionMode !== undefined && !RPA_SESSION_MODES.has(task.sessionMode)) {
+    push(issues, 'sessionMode', `Unsupported session mode: ${task.sessionMode}`);
   }
 
   return {

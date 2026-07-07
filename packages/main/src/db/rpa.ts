@@ -64,6 +64,7 @@ const hydrateTask = async (
     defaultRetry: row.default_retry || 0,
     screenshotPolicy: row.screenshot_policy || 'on-failure',
     closePolicy: row.close_policy || 'keepOpen',
+    sessionMode: row.session_mode || 'taskUrlOnly',
     variables: parseJson(row.variables_json, {}),
     sensitiveVariables: includeSensitive
       ? decryptSensitiveVariables(row.sensitive_variables_encrypted)
@@ -95,6 +96,7 @@ const taskToRow = (task: Partial<RpaTask>): Partial<DB.RpaTask> => {
     default_retry: task.defaultRetry,
     screenshot_policy: task.screenshotPolicy,
     close_policy: task.closePolicy,
+    session_mode: task.sessionMode,
     variables_json: task.variables ? stringifyJson(task.variables) : undefined,
     sensitive_variables_encrypted: task.sensitiveVariables
       ? encryptSensitiveVariables(task.sensitiveVariables)
@@ -141,6 +143,7 @@ const createTask = async (task: RpaTask) => {
         defaultRetry: task.defaultRetry || 0,
         screenshotPolicy: task.screenshotPolicy || 'on-failure',
         closePolicy: task.closePolicy || 'keepOpen',
+        sessionMode: task.sessionMode || 'taskUrlOnly',
       }),
       status: 1,
     });

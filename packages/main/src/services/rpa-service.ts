@@ -1,5 +1,5 @@
 import {ipcMain} from 'electron';
-import type {RpaRunOptions, RpaTask} from '../../../shared/types/rpa';
+import type {RpaRecorderOptions, RpaRunOptions, RpaTask} from '../../../shared/types/rpa';
 import {RpaDB} from '../db/rpa';
 import {rpaRecorder} from '../rpa/recorder';
 import {rpaScheduler} from '../rpa/scheduler';
@@ -63,8 +63,8 @@ export const initRpaService = () => {
     safeInvoke(async () => RpaDB.listRuns(taskId)),
   );
 
-  ipcMain.handle('rpa-recorder-start', async (_, windowId: number) =>
-    safeInvoke(async () => rpaRecorder.startRecorder(windowId)),
+  ipcMain.handle('rpa-recorder-start', async (_, windowId: number, options?: RpaRecorderOptions) =>
+    safeInvoke(async () => rpaRecorder.startRecorder(windowId, options || {})),
   );
 
   ipcMain.handle('rpa-recorder-stop', async (_, sessionId: string) =>

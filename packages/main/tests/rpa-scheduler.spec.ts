@@ -26,6 +26,7 @@ vi.mock('../src/db/rpa', () => ({
         defaultRetry: 0,
         screenshotPolicy: 'never',
         closePolicy: 'keepOpen',
+        sessionMode: 'taskUrlOnly',
         variables: {},
         sensitiveVariables: {},
         profileBindings: [{window_id: 10}],
@@ -67,6 +68,24 @@ vi.mock('../src/rpa/artifacts', () => ({
   getRpaArtifactRoot: () => '/tmp/rpa',
   getRpaRunRoot: (runId: number) => `/tmp/rpa/${runId}`,
   getRpaProfileArtifactDir: (runId: number, profileId: string) => `/tmp/rpa/${runId}/${profileId}`,
+}));
+
+vi.mock('../src/rpa/session', () => ({
+  DEFAULT_RPA_RUN_SESSION_MODE: 'taskUrlOnly',
+  getFirstGotoUrl: vi.fn(() => 'https://example.com'),
+  prepareRpaSession: vi.fn(({fallbackPage}) =>
+    Promise.resolve({
+      page: fallbackPage,
+      result: {
+        sessionMode: 'taskUrlOnly',
+        requestedSessionMode: 'taskUrlOnly',
+        closedPageCount: 1,
+        keptExtensionPageCount: 0,
+        warningMessages: [],
+        openedUrl: 'https://example.com',
+      },
+    }),
+  ),
 }));
 
 vi.mock('../src/rpa/executor', () => ({

@@ -1,8 +1,14 @@
 import {BrowserWindow} from 'electron';
 import type {Page} from 'playwright';
-import type {RpaRecorderEvent, RpaRecorderSession, RpaTaskStep} from '../../../shared/types/rpa';
+import type {
+  RpaRecorderEvent,
+  RpaRecorderOptions,
+  RpaRecorderSession,
+  RpaTaskStep,
+} from '../../../shared/types/rpa';
 import {openFingerprintWindow} from '../fingerprint';
 import {connectRpaBrowser, type RpaConnectedBrowser} from './automation';
+import {DEFAULT_RPA_RECORDER_SESSION_MODE, prepareRpaSession} from './session';
 
 interface InternalRecorderSession extends RpaRecorderSession {
   connected: RpaConnectedBrowser;
@@ -18,6 +24,8 @@ const isSensitiveSelector = (selector?: string) =>
   /(password|seed|mnemonic|private\s*key|privateKey|recovery\s*phrase|助记词|私钥|恢复短语)/i.test(
     selector || '',
   );
+
+const shouldRecordNavigation = (url?: string) => !!url && url !== 'about:blank';
 
 const toStep = (event: RpaRecorderEvent): RpaTaskStep => {
   const id = `${event.type}-${event.timestamp}`;
@@ -154,7 +162,7 @@ const recorderScript = (bindingName: string) => `
 class RpaRecorder {
   private sessions = new Map<string, InternalRecorderSession>();
 
-  async startRecorder(windowId: number): Promise<RpaRecorderSession> {
+  async startRecorder(windowId: number, options: RpaRecorderOptions = {}): Promise<RpaRecorderSession> {
     const openResult = await openFingerprintWindow(windowId);
     if (!openResult?.webSocketDebuggerUrl) {
       throw new Error(
@@ -162,6 +170,12 @@ class RpaRecorder {
       );
     }
     const connected = await connectRpaBrowser(openResult.webSocketDebuggerUrl);
+    const prepared = await prepareRpaSession({
+      context: connected.context,
+      fallbackPage: connected.page,
+      sessionMode: options.sessionMode || DEFAULT_RPA_RECORDER_SESSION_MODE,
+    });
+    connected.page = prepared.page;
     const sessionId = `rec-${windowId}-${Date.now()}`;
     const session: InternalRecorderSession = {
       sessionId,
@@ -197,6 +211,9 @@ class RpaRecorder {
         windowId: session.windowId,
         timestamp: payload.timestamp || Date.now(),
       };
+      if (event.type === 'navigation' && !shouldRecordNavigation(event.url)) {
+        return;
+      }
       event.step = toStep(event);
       session.events.push(event);
       emitRecorderEvent(event);
@@ -205,6 +222,7 @@ class RpaRecorder {
     await page.evaluate(recorderScript(bindingName)).catch(() => undefined);
     page.on('framenavigated', frame => {
       if (frame !== page.mainFrame()) return;
+      if (!shouldRecordNavigation(frame.url())) return;
       const event: RpaRecorderEvent = {
         sessionId: session.sessionId,
         windowId: session.windowId,

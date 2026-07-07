@@ -32,6 +32,7 @@ import type {
   RpaRecorderEvent,
   RpaRecorderSession,
   RpaRun,
+  RpaSessionMode,
   RpaTask,
   RpaTaskFlow,
   RpaTaskStep,
@@ -74,6 +75,12 @@ const parseFlowJson = (flowJson: string): RpaTaskFlow => JSON.parse(flowJson);
 
 const formatFlowJson = (flow?: RpaTaskFlow) => JSON.stringify(flow || sampleFlow, null, 2);
 
+const sessionModeOptions: Array<{label: string; value: RpaSessionMode}> = [
+  {label: 'Task URL only', value: 'taskUrlOnly'},
+  {label: 'Clean pages', value: 'cleanPages'},
+  {label: 'Keep existing', value: 'keepExisting'},
+];
+
 const Rpa = () => {
   const [messageApi, contextHolder] = message.useMessage({duration: 2, top: 120});
   const [tasks, setTasks] = useState<RpaTask[]>([]);
@@ -89,6 +96,7 @@ const Rpa = () => {
   const [recorderWindowId, setRecorderWindowId] = useState<number>();
   const [recorderSession, setRecorderSession] = useState<RpaRecorderSession>();
   const [recorderEvents, setRecorderEvents] = useState<RpaRecorderEvent[]>([]);
+  const [recorderSessionMode, setRecorderSessionMode] = useState<RpaSessionMode>('cleanPages');
   const [form] = Form.useForm();
 
   const windowOptions = useMemo(
@@ -147,6 +155,7 @@ const Rpa = () => {
       defaultRetry: 0,
       screenshotPolicy: 'on-failure',
       closePolicy: 'keepOpen',
+      sessionMode: 'taskUrlOnly',
       variablesJson: '{}',
       flowJson: formatFlowJson(sampleFlow),
     });
@@ -164,6 +173,7 @@ const Rpa = () => {
       defaultRetry: task.defaultRetry,
       screenshotPolicy: task.screenshotPolicy,
       closePolicy: task.closePolicy,
+      sessionMode: task.sessionMode || 'taskUrlOnly',
       variablesJson: JSON.stringify(task.variables || {}, null, 2),
       flowJson: formatFlowJson(task.flow),
     });
@@ -191,6 +201,7 @@ const Rpa = () => {
       defaultRetry: values.defaultRetry,
       screenshotPolicy: values.screenshotPolicy,
       closePolicy: values.closePolicy,
+      sessionMode: values.sessionMode,
       variables,
       profileBindings: selectedWindows.map(windowId => ({window_id: windowId})),
     };
@@ -214,6 +225,7 @@ const Rpa = () => {
     const run = await RpaBridge.startRun(task.id!, {
       concurrency: task.defaultConcurrency,
       closePolicy: task.closePolicy,
+      sessionMode: task.sessionMode || 'taskUrlOnly',
     });
     setActiveRun(run);
     setRunDrawerOpen(true);
@@ -231,7 +243,9 @@ const Rpa = () => {
       messageApi.warning('Select a profile first');
       return;
     }
-    const session = await RpaBridge.startRecorder(recorderWindowId);
+    const session = await RpaBridge.startRecorder(recorderWindowId, {
+      sessionMode: recorderSessionMode,
+    });
     setRecorderSession(session);
     setRecorderEvents(session.events || []);
     messageApi.success('Recorder started');
@@ -473,6 +487,12 @@ const Rpa = () => {
                 ]}
               />
             </Form.Item>
+            <Form.Item name="sessionMode" label="Session mode">
+              <Select
+                style={{width: 160}}
+                options={sessionModeOptions}
+              />
+            </Form.Item>
           </Space>
           <Form.Item label="Profiles">
             <CheckboxGroup
@@ -560,6 +580,13 @@ const Rpa = () => {
             value={recorderWindowId}
             options={windowOptions}
             onChange={setRecorderWindowId}
+          />
+          <Select
+            className="w-full"
+            value={recorderSessionMode}
+            options={sessionModeOptions}
+            onChange={setRecorderSessionMode}
+            disabled={!!recorderSession}
           />
           {recorderSession && <Alert type="warning" showIcon message="Recording is active in the selected profile." />}
           {!recorderSession && recorderEvents.length > 0 && (

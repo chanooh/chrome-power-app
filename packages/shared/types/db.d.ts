@@ -5,6 +5,7 @@ import type {
   RpaClosePolicy,
   RpaRunStatus,
   RpaScreenshotPolicy,
+  RpaSessionMode,
   RpaStepStatus,
   RpaStepType,
 } from './rpa';
@@ -114,6 +115,7 @@ export namespace DB {
     default_retry?: number;
     screenshot_policy?: RpaScreenshotPolicy;
     close_policy?: RpaClosePolicy;
+    session_mode?: RpaSessionMode;
     variables_json?: string | null;
     sensitive_variables_encrypted?: string | null;
     status?: number;

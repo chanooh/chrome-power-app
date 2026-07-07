@@ -42,6 +42,7 @@ export type RpaStepStatus =
 
 export type RpaScreenshotPolicy = 'never' | 'on-failure' | 'every-step';
 export type RpaClosePolicy = 'keepOpen' | 'closeOnSuccess' | 'closeAlways';
+export type RpaSessionMode = 'keepExisting' | 'cleanPages' | 'taskUrlOnly';
 
 export interface RpaStepTarget {
   page?: 'current' | 'first' | 'last' | 'popup' | string;
@@ -92,6 +93,7 @@ export interface RpaTask {
   defaultRetry: number;
   screenshotPolicy: RpaScreenshotPolicy;
   closePolicy: RpaClosePolicy;
+  sessionMode: RpaSessionMode;
   variables?: Record<string, string>;
   sensitiveVariables?: Record<string, string>;
   status?: number;
@@ -113,7 +115,21 @@ export interface RpaRunOptions {
   windowIds?: number[];
   concurrency?: number;
   closePolicy?: RpaClosePolicy;
+  sessionMode?: RpaSessionMode;
   variables?: Record<string, string>;
+}
+
+export interface RpaRecorderOptions {
+  sessionMode?: RpaSessionMode;
+}
+
+export interface RpaSessionPrepareResult {
+  sessionMode: RpaSessionMode;
+  requestedSessionMode: RpaSessionMode;
+  closedPageCount: number;
+  keptExtensionPageCount: number;
+  warningMessages: string[];
+  openedUrl?: string;
 }
 
 export interface RpaRun {

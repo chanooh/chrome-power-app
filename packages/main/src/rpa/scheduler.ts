@@ -13,6 +13,11 @@ import {closeFingerprintWindow, openFingerprintWindow} from '../fingerprint';
 import {connectRpaBrowser} from './automation';
 import {getRpaArtifactRoot, getRpaProfileArtifactDir, getRpaRunRoot} from './artifacts';
 import {executeRpaFlow, type RpaStepExecutionRecord} from './executor';
+import {
+  DEFAULT_RPA_RUN_SESSION_MODE,
+  getFirstGotoUrl,
+  prepareRpaSession,
+} from './session';
 import {mergeVariables} from './variables';
 import {createLogger} from '../../../shared/utils/logger';
 import {SERVICE_LOGGER_LABEL} from '../constants';
@@ -202,7 +207,6 @@ export class RpaScheduler {
           `Profile ${binding.window_id} failed to start or did not expose a CDP endpoint. Check the launch warning shown before this RPA error.`,
         );
       }
-      connected = await connectRpaBrowser(browserWSEndpoint);
       const variables = mergeVariables(
         task.variables,
         task.sensitiveVariables,
@@ -214,6 +218,19 @@ export class RpaScheduler {
           'window.id': String(binding.window_id),
         },
       );
+      connected = await connectRpaBrowser(browserWSEndpoint);
+      const requestedSessionMode = options.sessionMode || task.sessionMode || DEFAULT_RPA_RUN_SESSION_MODE;
+      const prepared = await prepareRpaSession({
+        context: connected.context,
+        fallbackPage: connected.page,
+        sessionMode: requestedSessionMode,
+        taskUrl: getFirstGotoUrl(task.flow, variables),
+      });
+      connected.page = prepared.page;
+      await RpaDB.updateRun(runId, {
+        message: `Session ${prepared.result.sessionMode}: closed ${prepared.result.closedPageCount} page(s), kept ${prepared.result.keptExtensionPageCount} extension page(s).${prepared.result.warningMessages.length ? ` ${prepared.result.warningMessages.join(' ')}` : ''}`,
+      });
+      emit('rpa-run-updated', await RpaDB.getRun(runId));
       const stepRowIds = new Map<string, number>();
       const stepKey = (step: RpaTaskStep, stepIndex: number, attempt: number) =>
         `${step.id}:${stepIndex}:${attempt}`;

@@ -51,6 +51,7 @@ const task = (steps: RpaTask['flow']['steps']): RpaTask => ({
   defaultRetry: 0,
   screenshotPolicy: 'never',
   closePolicy: 'keepOpen',
+  sessionMode: 'taskUrlOnly',
 });
 
 describe('rpa executor', () => {

@@ -10,6 +10,7 @@ const baseTask = (steps: RpaTask['flow']['steps']): RpaTask => ({
   defaultRetry: 0,
   screenshotPolicy: 'on-failure',
   closePolicy: 'keepOpen',
+  sessionMode: 'taskUrlOnly',
 });
 
 describe('rpa validation', () => {
@@ -65,5 +66,15 @@ describe('rpa validation', () => {
     expect(result.valid).toBe(false);
     expect(result.issues.some(issue => issue.message.includes('Duplicate'))).toBe(true);
     expect(result.issues.some(issue => issue.path.endsWith('.valueFrom'))).toBe(true);
+  });
+
+  test('rejects unsupported session modes', () => {
+    const result = validateRpaTask({
+      ...baseTask([{id: 'goto', type: 'goto', url: 'https://example.com'}]),
+      sessionMode: 'bad-mode' as never,
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.issues.some(issue => issue.path === 'sessionMode')).toBe(true);
   });
 });

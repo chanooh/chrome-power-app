@@ -2,6 +2,7 @@ import type {IpcRendererEvent} from 'electron';
 import {ipcRenderer} from 'electron';
 import type {
   RpaRecorderEvent,
+  RpaRecorderOptions,
   RpaRecorderSession,
   RpaRun,
   RpaRunOptions,
@@ -54,8 +55,8 @@ export const RpaBridge = {
     return ipcRenderer.invoke('rpa-run-list', taskId);
   },
 
-  startRecorder(windowId: number): Promise<RpaRecorderSession> {
-    return ipcRenderer.invoke('rpa-recorder-start', windowId);
+  startRecorder(windowId: number, options?: RpaRecorderOptions): Promise<RpaRecorderSession> {
+    return ipcRenderer.invoke('rpa-recorder-start', windowId, options);
   },
 
   stopRecorder(sessionId: string): Promise<RpaRecorderSession> {
