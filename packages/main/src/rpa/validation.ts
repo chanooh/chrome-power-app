@@ -63,7 +63,17 @@ const push = (
 };
 
 const hasSelector = (step: RpaTaskStep) =>
-  typeof step.selector === 'string' || (Array.isArray(step.selectors) && step.selectors.length > 0);
+  typeof step.selector === 'string' ||
+  (Array.isArray(step.selectors) && step.selectors.length > 0) ||
+  (Array.isArray(step.locators) && step.locators.length > 0);
+
+const hasLowQualityLocator = (step: RpaTaskStep) => {
+  if (step.quality === 'low' || step.element?.quality === 'low') return true;
+  if (step.locators?.length) {
+    return Math.max(...step.locators.map(locator => locator.score || 0)) < 45;
+  }
+  return !step.locators?.length && !!step.selector && /nth-of-type|^div\s*>/.test(step.selector);
+};
 
 export const isSensitiveFillStep = (step: RpaTaskStep) => {
   if (step.type !== 'fill') return false;
@@ -111,6 +121,15 @@ export const validateRpaTask = (task: Partial<RpaTask>): RpaValidationResult => 
 
     if (SELECTOR_STEP_TYPES.has(step.type) && !hasSelector(step)) {
       push(issues, `${path}.selector`, `${step.type} requires selector or selectors.`);
+    }
+
+    if (SELECTOR_STEP_TYPES.has(step.type) && hasSelector(step) && hasLowQualityLocator(step)) {
+      push(
+        issues,
+        `${path}.locator`,
+        `${step.type} uses low-quality locator data and may be unstable on dynamic pages.`,
+        'warning',
+      );
     }
 
     if (step.type === 'goto' && !step.url) {

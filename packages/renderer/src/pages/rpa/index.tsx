@@ -75,6 +75,46 @@ const parseFlowJson = (flowJson: string): RpaTaskFlow => JSON.parse(flowJson);
 
 const formatFlowJson = (flow?: RpaTaskFlow) => JSON.stringify(flow || sampleFlow, null, 2);
 
+const recorderEventKey = (event: RpaRecorderEvent) =>
+  `${event.sessionId}:${event.windowId}:${event.type}:${event.timestamp}`;
+
+const upsertRecorderEvent = (events: RpaRecorderEvent[], event: RpaRecorderEvent) => {
+  const key = recorderEventKey(event);
+  const index = events.findIndex(item => recorderEventKey(item) === key);
+  if (index < 0) return [...events, event];
+  const next = [...events];
+  next[index] = event;
+  return next;
+};
+
+const cleanRecorderEventsForSteps = (events: RpaRecorderEvent[]) => {
+  const cleaned: RpaRecorderEvent[] = [];
+  for (const event of events) {
+    const previous = cleaned[cleaned.length - 1];
+    if (
+      event.type === 'navigation' &&
+      previous?.type === 'navigation' &&
+      previous.url === event.url &&
+      event.timestamp - previous.timestamp < 2000
+    ) {
+      continue;
+    }
+    if (
+      event.type === 'navigation' &&
+      previous?.type === 'click' &&
+      event.url &&
+      previous.expectedUrl === event.url
+    ) {
+      continue;
+    }
+    cleaned.push(event);
+  }
+  return cleaned.map(event => event.step).filter(Boolean) as RpaTaskStep[];
+};
+
+const recorderTargetText = (event: RpaRecorderEvent) =>
+  event.element?.href || event.element?.text || event.text || event.expectedUrl || event.url || '';
+
 const sessionModeOptions: Array<{label: string; value: RpaSessionMode}> = [
   {label: 'Task URL only', value: 'taskUrlOnly'},
   {label: 'Clean pages', value: 'cleanPages'},
@@ -135,7 +175,7 @@ const Rpa = () => {
       setRuns(current => [run, ...current.filter(item => item.id !== run.id)]);
     });
     const offRecorder = RpaBridge.onRecorderEvent((_, event) => {
-      setRecorderEvents(current => [...current, event]);
+      setRecorderEvents(current => upsertRecorderEvent(current, event));
     });
     return () => {
       offRun();
@@ -268,7 +308,7 @@ const Rpa = () => {
   };
 
   const appendRecorderSteps = () => {
-    const steps = recorderEvents.map(event => event.step).filter(Boolean) as RpaTaskStep[];
+    const steps = cleanRecorderEventsForSteps(recorderEvents);
     if (!steps.length) {
       messageApi.warning('No recorder steps to append');
       return;
@@ -284,6 +324,10 @@ const Rpa = () => {
     setRecorderEvents([]);
     setRecorderSession(undefined);
     setRecorderOpen(false);
+    if (steps.some(step => step.quality === 'low' || step.element?.quality === 'low')) {
+      messageApi.warning('Some appended steps use low-quality locators and may need manual review');
+      return;
+    }
     messageApi.success(`${steps.length} steps appended`);
   };
 
@@ -609,7 +653,35 @@ const Rpa = () => {
             size="small"
             columns={[
               {title: 'Type', dataIndex: 'type', width: 100},
+              {
+                title: 'Quality',
+                dataIndex: 'quality',
+                width: 90,
+                render: (_: string, event: RpaRecorderEvent) =>
+                  event.quality ? (
+                    <Tag color={event.quality === 'high' ? 'success' : event.quality === 'medium' ? 'warning' : 'error'}>
+                      {event.quality}
+                    </Tag>
+                  ) : null,
+              },
+              {
+                title: 'Target',
+                render: (_: string, event: RpaRecorderEvent) => (
+                  <Text ellipsis style={{maxWidth: 260}}>
+                    {recorderTargetText(event)}
+                  </Text>
+                ),
+              },
               {title: 'Selector', dataIndex: 'selector'},
+              {
+                title: 'Expected URL',
+                dataIndex: 'expectedUrl',
+                render: (value: string) => (
+                  <Text ellipsis style={{maxWidth: 220}}>
+                    {value || ''}
+                  </Text>
+                ),
+              },
               {title: 'Value', dataIndex: 'value', width: 160},
             ]}
             dataSource={recorderEvents}

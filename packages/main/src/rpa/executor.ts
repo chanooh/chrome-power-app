@@ -7,6 +7,12 @@ import type {
 } from '../../../shared/types/rpa';
 import {findPageByTarget} from './automation';
 import {resolveRpaArtifactPath, writeRpaJsonArtifact} from './artifacts';
+import {
+  clickRpaElement,
+  getRpaLocatorCandidates,
+  getRpaLocatorDebug,
+  resolveRpaElement,
+} from './locator';
 import {isSensitiveFillStep} from './validation';
 import {renderTemplateValue, resolveVariablePath} from './variables';
 
@@ -42,8 +48,6 @@ export interface RpaExecutionContext {
   hooks?: RpaExecutionHooks;
 }
 
-const SELECTOR_TIMEOUT_FLOOR = 500;
-
 const getStepTimeout = (task: RpaTask, step: RpaTaskStep) =>
   step.timeoutMs || task.defaultTimeoutMs || 30000;
 
@@ -60,26 +64,6 @@ const getTargetFrame = (page: Page, step: RpaTaskStep): Page | Frame => {
     throw new Error(`Frame not found: ${frameTarget}`);
   }
   return frame;
-};
-
-const resolveSelector = async (
-  target: Page | Frame,
-  step: RpaTaskStep,
-  timeoutMs: number,
-) => {
-  const selectors = [step.selector, ...(step.selectors || [])].filter(Boolean) as string[];
-  if (!selectors.length) return undefined;
-  const perSelectorTimeout = Math.max(SELECTOR_TIMEOUT_FLOOR, Math.floor(timeoutMs / selectors.length));
-  let lastError: Error | undefined;
-  for (const selector of selectors) {
-    try {
-      await target.waitForSelector(selector, {timeout: perSelectorTimeout, state: 'attached'});
-      return selector;
-    } catch (error) {
-      lastError = error as Error;
-    }
-  }
-  throw lastError || new Error(`Selector not found: ${selectors.join(', ')}`);
 };
 
 const textMatches = (actual: string, expected: string) => {
@@ -102,6 +86,21 @@ const screenshot = async (
   return path;
 };
 
+const locatorDebugArtifact = (
+  artifactDir: string,
+  step: RpaTaskStep,
+  stepIndex: number,
+  error: unknown,
+) => {
+  const debug = getRpaLocatorDebug(error);
+  if (!debug) return undefined;
+  const fileName = `${String(stepIndex + 1).padStart(3, '0')}-${step.id}-locator-debug.json`;
+  return writeRpaJsonArtifact(artifactDir, fileName, {
+    ...debug,
+    error: (error as Error).message,
+  });
+};
+
 const executeSingleStep = async (
   execution: RpaExecutionContext,
   step: RpaTaskStep,
@@ -112,7 +111,6 @@ const executeSingleStep = async (
   execution.page = page;
   await page.bringToFront().catch(() => undefined);
   const target = getTargetFrame(page, step);
-  const selector = await resolveSelector(target, step, timeoutMs);
   const renderedValue = renderTemplateValue(
     step.valueFrom ? resolveVariablePath(step.valueFrom, execution.variables) : step.value,
     execution.variables,
@@ -125,32 +123,56 @@ const executeSingleStep = async (
         timeout: timeoutMs,
       });
       return {message: `Navigated to ${page.url()}`};
-    case 'waitForSelector':
-      return {message: `Selector ready: ${selector}`};
-    case 'click':
-      await target.locator(selector!).click({timeout: timeoutMs});
-      return {message: `Clicked ${selector}`};
+    case 'waitForSelector': {
+      const resolved = await resolveRpaElement(target, page, step, timeoutMs, 'visible');
+      return {message: `Element ready: ${resolved?.label || 'page'}`};
+    }
+    case 'click': {
+      const clicked = await clickRpaElement(
+        target,
+        page,
+        step,
+        timeoutMs,
+        renderTemplateValue(step.expectedUrl, execution.variables),
+      );
+      return {message: `Clicked ${clicked.label}`};
+    }
     case 'fill':
       if (isSensitiveFillStep(step)) {
         throw new Error('Sensitive recovery/private-key style input is blocked. Use manualConfirm.');
       }
-      await target.locator(selector!).fill(renderedValue || '', {timeout: timeoutMs});
-      return {message: `Filled ${selector}`};
+      {
+        const resolved = await resolveRpaElement(target, page, step, timeoutMs, 'visible');
+        await resolved!.locator.fill(renderedValue || '', {timeout: timeoutMs});
+        return {message: `Filled ${resolved!.label}`};
+      }
     case 'press':
       await page.keyboard.press(step.key!, {delay: 20});
       return {message: `Pressed ${step.key}`};
     case 'select':
-      await target.locator(selector!).selectOption(renderedValue || step.value || '', {timeout: timeoutMs});
-      return {message: `Selected ${selector}`};
+      {
+        const resolved = await resolveRpaElement(target, page, step, timeoutMs, 'visible');
+        await resolved!.locator.selectOption(renderedValue || step.value || '', {timeout: timeoutMs});
+        return {message: `Selected ${resolved!.label}`};
+      }
     case 'check':
-      await target.locator(selector!).check({timeout: timeoutMs});
-      return {message: `Checked ${selector}`};
+      {
+        const resolved = await resolveRpaElement(target, page, step, timeoutMs, 'visible');
+        await resolved!.locator.check({timeout: timeoutMs});
+        return {message: `Checked ${resolved!.label}`};
+      }
     case 'uncheck':
-      await target.locator(selector!).uncheck({timeout: timeoutMs});
-      return {message: `Unchecked ${selector}`};
+      {
+        const resolved = await resolveRpaElement(target, page, step, timeoutMs, 'visible');
+        await resolved!.locator.uncheck({timeout: timeoutMs});
+        return {message: `Unchecked ${resolved!.label}`};
+      }
     case 'hover':
-      await target.locator(selector!).hover({timeout: timeoutMs});
-      return {message: `Hovered ${selector}`};
+      {
+        const resolved = await resolveRpaElement(target, page, step, timeoutMs, 'visible');
+        await resolved!.locator.hover({timeout: timeoutMs});
+        return {message: `Hovered ${resolved!.label}`};
+      }
     case 'scroll':
       await page.mouse.wheel(step.x || 0, step.y || 600);
       return {message: 'Scrolled page'};
@@ -168,21 +190,28 @@ const executeSingleStep = async (
       return {message: 'Screenshot saved', artifactPath};
     }
     case 'extractText': {
-      const text = selector ? await target.locator(selector).innerText({timeout: timeoutMs}) : await page.title();
+      const resolved = getRpaLocatorCandidates(step).length
+        ? await resolveRpaElement(target, page, step, timeoutMs, 'visible')
+        : undefined;
+      const text = resolved ? await resolved.locator.innerText({timeout: timeoutMs}) : await page.title();
       const output = {[step.outputKey || step.id]: text};
       writeRpaJsonArtifact(execution.artifactDir, `${step.id}-output.json`, output);
       return {message: 'Text extracted', output};
     }
     case 'extractAttribute': {
-      const value = await target.locator(selector!).getAttribute(step.attribute!, {timeout: timeoutMs});
+      const resolved = await resolveRpaElement(target, page, step, timeoutMs, 'visible');
+      const value = await resolved!.locator.getAttribute(step.attribute!, {timeout: timeoutMs});
       const output = {[step.outputKey || step.id]: value};
       writeRpaJsonArtifact(execution.artifactDir, `${step.id}-output.json`, output);
       return {message: `Attribute extracted: ${step.attribute}`, output};
     }
     case 'assertText': {
-      const actual = selector ? await target.locator(selector).innerText({timeout: timeoutMs}) : await page.content();
+      const resolved = getRpaLocatorCandidates(step).length
+        ? await resolveRpaElement(target, page, step, timeoutMs, 'visible')
+        : undefined;
+      const actual = resolved ? await resolved.locator.innerText({timeout: timeoutMs}) : await page.content();
       if (!textMatches(actual, renderTemplateValue(step.expected || step.text, execution.variables) || '')) {
-        throw new Error(`Text assertion failed for ${selector || 'page'}`);
+        throw new Error(`Text assertion failed for ${resolved?.label || 'page'}`);
       }
       return {message: 'Text assertion passed'};
     }
@@ -257,10 +286,14 @@ export const executeRpaFlow = async (execution: RpaExecutionContext) => {
         lastError = error as Error;
         const isLastAttempt = attempt >= maxAttempts;
         let artifactPath: string | undefined;
+        let locatorDebugPath: string | undefined;
         if (isLastAttempt && execution.screenshotPolicy !== 'never') {
           artifactPath = await screenshot(execution.page, execution.artifactDir, step, stepIndex, 'failure').catch(
             () => undefined,
           );
+        }
+        if (isLastAttempt) {
+          locatorDebugPath = locatorDebugArtifact(execution.artifactDir, step, stepIndex, lastError);
         }
         const record: RpaStepExecutionRecord = {
           step,
@@ -271,6 +304,7 @@ export const executeRpaFlow = async (execution: RpaExecutionContext) => {
           status: isLastAttempt ? (step.continueOnError ? 'skipped' : 'failed') : 'failed',
           error: lastError.message,
           artifactPath,
+          output: locatorDebugPath ? {locatorDebugPath} : undefined,
         };
         await execution.hooks?.afterStep?.(record);
         records.push(record);

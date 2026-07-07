@@ -11,6 +11,12 @@ vi.mock('electron', () => ({
 
 const createMockAutomation = () => {
   const locator = {
+    first: vi.fn(() => locator),
+    waitFor: vi.fn(() => Promise.resolve()),
+    count: vi.fn(() => Promise.resolve(1)),
+    scrollIntoViewIfNeeded: vi.fn(() => Promise.resolve()),
+    boundingBox: vi.fn(() => Promise.resolve({x: 10, y: 20, width: 100, height: 40})),
+    evaluate: vi.fn(() => Promise.resolve()),
     click: vi.fn(() => Promise.resolve()),
     fill: vi.fn(() => Promise.resolve()),
     innerText: vi.fn(() => Promise.resolve('Welcome Example Domain')),
@@ -28,6 +34,11 @@ const createMockAutomation = () => {
     frames: () => [],
     waitForSelector: vi.fn(() => Promise.resolve({})),
     locator: vi.fn(() => locator),
+    getByRole: vi.fn(() => locator),
+    getByText: vi.fn(() => locator),
+    getByTestId: vi.fn(() => locator),
+    getByLabel: vi.fn(() => locator),
+    getByPlaceholder: vi.fn(() => locator),
     goto: vi.fn(() => Promise.resolve()),
     keyboard: {press: vi.fn(() => Promise.resolve())},
     mouse: {wheel: vi.fn(() => Promise.resolve())},
@@ -91,6 +102,41 @@ describe('rpa executor', () => {
       'click:succeeded',
       'assert:succeeded',
     ]);
+  });
+
+  test('prefers enhanced locators over brittle css fallback', async () => {
+    const {context, page, locator} = createMockAutomation();
+
+    await executeRpaFlow({
+      task: task([
+        {
+          id: 'click-reddit',
+          type: 'click',
+          selector: 'div > div:nth-of-type(1) > div > span > a',
+          locators: [
+            {
+              type: 'role',
+              role: 'link',
+              value: 'Reddit',
+              name: 'Reddit',
+              score: 85,
+            },
+          ],
+          expectedUrl: 'https://www.reddit.com/',
+        },
+      ]),
+      window: {id: 1, profile_id: 'profile-alpha'},
+      context,
+      page,
+      artifactDir: '/tmp',
+      variables: {},
+      screenshotPolicy: 'never',
+    });
+
+    expect(page.getByRole).toHaveBeenCalledWith('link', {name: 'Reddit', exact: undefined});
+    expect(page.locator).not.toHaveBeenCalledWith('div > div:nth-of-type(1) > div > span > a');
+    expect(locator.click).toHaveBeenCalled();
+    expect(page.waitForURL).toHaveBeenCalled();
   });
 
   test('blocks sensitive fill steps at execution time', async () => {

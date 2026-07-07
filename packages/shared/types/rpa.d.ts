@@ -43,6 +43,51 @@ export type RpaStepStatus =
 export type RpaScreenshotPolicy = 'never' | 'on-failure' | 'every-step';
 export type RpaClosePolicy = 'keepOpen' | 'closeOnSuccess' | 'closeAlways';
 export type RpaSessionMode = 'keepExisting' | 'cleanPages' | 'taskUrlOnly';
+export type RpaLocatorQuality = 'high' | 'medium' | 'low';
+export type RpaLocatorType =
+  | 'testId'
+  | 'role'
+  | 'label'
+  | 'placeholder'
+  | 'id'
+  | 'name'
+  | 'href'
+  | 'text'
+  | 'css'
+  | 'xpath'
+  | 'bounds';
+
+export interface RpaElementBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface RpaLocatorCandidate {
+  type: RpaLocatorType;
+  value: string;
+  role?: string;
+  name?: string;
+  text?: string;
+  exact?: boolean;
+  score?: number;
+}
+
+export interface RpaElementSnapshot {
+  tag: string;
+  role?: string;
+  text?: string;
+  ariaLabel?: string;
+  href?: string;
+  id?: string;
+  name?: string;
+  inputType?: string;
+  placeholder?: string;
+  recordedUrl?: string;
+  bounds?: RpaElementBounds;
+  quality?: RpaLocatorQuality;
+}
 
 export interface RpaStepTarget {
   page?: 'current' | 'first' | 'last' | 'popup' | string;
@@ -58,6 +103,9 @@ export interface RpaTaskStep {
   url?: string;
   selector?: string;
   selectors?: string[];
+  locators?: RpaLocatorCandidate[];
+  element?: RpaElementSnapshot;
+  quality?: RpaLocatorQuality;
   value?: string;
   valueFrom?: string;
   key?: string;
@@ -75,6 +123,8 @@ export interface RpaTaskStep {
   y?: number;
   behavior?: 'auto' | 'smooth';
   loadState?: 'load' | 'domcontentloaded' | 'networkidle';
+  expectedUrl?: string;
+  waitAfterClick?: 'none' | 'domcontentloaded' | 'load' | 'networkidle';
 }
 
 export interface RpaTaskFlow {
@@ -208,6 +258,10 @@ export interface RpaRecorderEvent {
   url?: string;
   selector?: string;
   selectors?: string[];
+  locators?: RpaLocatorCandidate[];
+  element?: RpaElementSnapshot;
+  quality?: RpaLocatorQuality;
+  expectedUrl?: string;
   value?: string;
   key?: string;
   text?: string;

@@ -33,6 +33,21 @@ describe('rpa validation', () => {
     expect(result.issues.map(issue => issue.path)).toContain('flow.steps[0].selector');
   });
 
+  test('warns but accepts low quality locator steps', () => {
+    const result = validateRpaTask(
+      baseTask([
+        {
+          id: 'click',
+          type: 'click',
+          selector: 'div > div:nth-of-type(1) > span',
+        },
+      ]),
+    );
+
+    expect(result.valid).toBe(true);
+    expect(result.issues.some(issue => issue.severity === 'warning' && issue.path === 'flow.steps[0].locator')).toBe(true);
+  });
+
   test('rejects sensitive fill steps', () => {
     const result = validateRpaTask(
       baseTask([
