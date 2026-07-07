@@ -1,5 +1,9 @@
 import {BrowserWindow} from 'electron';
-import type {Page} from 'playwright';
+import puppeteer, {
+  type Browser as PuppeteerBrowser,
+  type Page as PuppeteerPage,
+  type Target as PuppeteerTarget,
+} from 'puppeteer';
 import type {
   RpaRecorderEvent,
   RpaRecorderOptions,
@@ -7,11 +11,17 @@ import type {
   RpaTaskStep,
 } from '../../../shared/types/rpa';
 import {openFingerprintWindow} from '../fingerprint';
-import {connectRpaBrowser, type RpaConnectedBrowser} from './automation';
-import {DEFAULT_RPA_RECORDER_SESSION_MODE, prepareRpaSession} from './session';
+import {classifyRpaPageUrl, DEFAULT_RPA_RECORDER_SESSION_MODE} from './session';
+
+interface RpaRecorderConnection {
+  browser: PuppeteerBrowser;
+  page: PuppeteerPage;
+  disconnect: () => Promise<void>;
+}
 
 interface InternalRecorderSession extends RpaRecorderSession {
-  connected: RpaConnectedBrowser;
+  connected: RpaRecorderConnection;
+  preparedPages: WeakSet<PuppeteerPage>;
 }
 
 const emitRecorderEvent = (event: RpaRecorderEvent) => {
@@ -26,6 +36,62 @@ const isSensitiveSelector = (selector?: string) =>
   );
 
 const shouldRecordNavigation = (url?: string) => !!url && url !== 'about:blank';
+
+const connectRpaRecorderBrowser = async (browserWSEndpoint: string): Promise<RpaRecorderConnection> => {
+  const browser = await puppeteer.connect({
+    browserWSEndpoint,
+    defaultViewport: null,
+  });
+  const pages = (await browser.pages()).filter(page => !page.isClosed());
+  let page = pages.find(candidate => classifyRpaPageUrl(candidate.url()) !== 'internal');
+  if (!page) {
+    page = await browser.newPage();
+  }
+  await page.bringToFront().catch(() => undefined);
+
+  return {
+    browser,
+    page,
+    disconnect: async () => {
+      browser.disconnect();
+    },
+  };
+};
+
+const chooseExistingRecorderPage = async (browser: PuppeteerBrowser, fallbackPage: PuppeteerPage) => {
+  const pages = (await browser.pages()).filter(page => !page.isClosed());
+  if (!fallbackPage.isClosed() && classifyRpaPageUrl(fallbackPage.url()) !== 'internal') {
+    return fallbackPage;
+  }
+  return (
+    pages.find(page => classifyRpaPageUrl(page.url()) === 'ordinary') ||
+    pages.find(page => classifyRpaPageUrl(page.url()) === 'extension') ||
+    pages[0] ||
+    (await browser.newPage())
+  );
+};
+
+const prepareRecorderSession = async (
+  connected: RpaRecorderConnection,
+  sessionMode = DEFAULT_RPA_RECORDER_SESSION_MODE,
+) => {
+  if (sessionMode === 'keepExisting') {
+    connected.page = await chooseExistingRecorderPage(connected.browser, connected.page);
+    await connected.page.bringToFront().catch(() => undefined);
+    return;
+  }
+
+  const pages = (await connected.browser.pages()).filter(page => !page.isClosed());
+  for (const page of pages) {
+    const kind = classifyRpaPageUrl(page.url());
+    if (kind === 'extension' || kind === 'other') continue;
+    await page.close({runBeforeUnload: false}).catch(() => undefined);
+  }
+
+  connected.page = await connected.browser.newPage();
+  await connected.page.goto('about:blank').catch(() => undefined);
+  await connected.page.bringToFront().catch(() => undefined);
+};
 
 const toStep = (event: RpaRecorderEvent): RpaTaskStep => {
   const id = `${event.type}-${event.timestamp}`;
@@ -169,13 +235,8 @@ class RpaRecorder {
         `Profile ${windowId} failed to start or did not expose a CDP endpoint. Check the launch warning shown before this RPA error.`,
       );
     }
-    const connected = await connectRpaBrowser(openResult.webSocketDebuggerUrl);
-    const prepared = await prepareRpaSession({
-      context: connected.context,
-      fallbackPage: connected.page,
-      sessionMode: options.sessionMode || DEFAULT_RPA_RECORDER_SESSION_MODE,
-    });
-    connected.page = prepared.page;
+    const connected = await connectRpaRecorderBrowser(openResult.webSocketDebuggerUrl);
+    await prepareRecorderSession(connected, options.sessionMode || DEFAULT_RPA_RECORDER_SESSION_MODE);
     const sessionId = `rec-${windowId}-${Date.now()}`;
     const session: InternalRecorderSession = {
       sessionId,
@@ -183,11 +244,12 @@ class RpaRecorder {
       startedAt: new Date().toISOString(),
       events: [],
       connected,
+      preparedPages: new WeakSet<PuppeteerPage>(),
     };
     this.sessions.set(sessionId, session);
     await this.setupPage(session, connected.page);
-    connected.context.on('page', page => {
-      void this.setupPage(session, page);
+    connected.browser.on('targetcreated', target => {
+      void this.setupTarget(session, target);
     });
     return this.publicSession(session);
   }
@@ -202,9 +264,20 @@ class RpaRecorder {
     return this.publicSession(session);
   }
 
-  private async setupPage(session: InternalRecorderSession, page: Page) {
+  private async setupTarget(session: InternalRecorderSession, target: PuppeteerTarget) {
+    const page = await target.page().catch(() => undefined);
+    if (page) {
+      await this.setupPage(session, page);
+    }
+  }
+
+  private async setupPage(session: InternalRecorderSession, page: PuppeteerPage) {
+    if (session.preparedPages.has(page)) {
+      return;
+    }
+    session.preparedPages.add(page);
     const bindingName = `__chromePowerRpaRecord_${session.sessionId.replace(/[^a-zA-Z0-9_]/g, '_')}`;
-    await page.exposeBinding(bindingName, async (_source, payload: Omit<RpaRecorderEvent, 'sessionId' | 'windowId' | 'step'>) => {
+    await page.exposeFunction(bindingName, async (payload: Omit<RpaRecorderEvent, 'sessionId' | 'windowId' | 'step'>) => {
       const event: RpaRecorderEvent = {
         ...payload,
         sessionId: session.sessionId,
@@ -218,7 +291,7 @@ class RpaRecorder {
       session.events.push(event);
       emitRecorderEvent(event);
     }).catch(() => undefined);
-    await page.addInitScript({content: recorderScript(bindingName)}).catch(() => undefined);
+    await page.evaluateOnNewDocument(recorderScript(bindingName)).catch(() => undefined);
     await page.evaluate(recorderScript(bindingName)).catch(() => undefined);
     page.on('framenavigated', frame => {
       if (frame !== page.mainFrame()) return;

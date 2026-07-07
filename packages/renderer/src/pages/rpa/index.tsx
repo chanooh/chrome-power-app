@@ -243,20 +243,28 @@ const Rpa = () => {
       messageApi.warning('Select a profile first');
       return;
     }
-    const session = await RpaBridge.startRecorder(recorderWindowId, {
-      sessionMode: recorderSessionMode,
-    });
-    setRecorderSession(session);
-    setRecorderEvents(session.events || []);
-    messageApi.success('Recorder started');
+    try {
+      const session = await RpaBridge.startRecorder(recorderWindowId, {
+        sessionMode: recorderSessionMode,
+      });
+      setRecorderSession(session);
+      setRecorderEvents(session.events || []);
+      messageApi.success('Recorder started');
+    } catch (error) {
+      messageApi.error((error as Error).message);
+    }
   };
 
   const stopRecorder = async () => {
     if (!recorderSession) return;
-    const session = await RpaBridge.stopRecorder(recorderSession.sessionId);
-    setRecorderSession(undefined);
-    setRecorderEvents(session.events || recorderEvents);
-    messageApi.success('Recorder stopped');
+    try {
+      const session = await RpaBridge.stopRecorder(recorderSession.sessionId);
+      setRecorderSession(undefined);
+      setRecorderEvents(session.events || recorderEvents);
+      messageApi.success('Recorder stopped');
+    } catch (error) {
+      messageApi.error((error as Error).message);
+    }
   };
 
   const appendRecorderSteps = () => {
