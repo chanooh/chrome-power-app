@@ -5,6 +5,7 @@ import {WindowDB} from '../db/window';
 import {BrowserWindow} from 'electron';
 import puppeteer from 'puppeteer';
 import {execSync, spawn} from 'child_process';
+import {existsSync} from 'fs';
 import * as portscanner from 'portscanner';
 import {sleep} from '../utils/sleep';
 import SocksServer from '../proxy-server/socks-server';
@@ -311,16 +312,25 @@ export async function openFingerprintWindow(id: number, headless = false) {
       const verifiedExtensionPaths: string[] = [];
       for (const extension of extensionData) {
         const verification = verifyExtensionRepository(extension);
+        const extensionPath = extension.current_path || extension.path;
         if (!verification.success) {
           const message = `Extension "${extension.name}" failed verification: ${verification.message}`;
-          logger.error(message);
+          logger.warn(message);
           bridgeMessageToUI({
-            type: 'error',
+            type: 'warning',
             text: message,
           });
-          return null;
         }
-        verifiedExtensionPaths.push(extension.current_path || extension.path);
+        if (extensionPath && existsSync(extensionPath)) {
+          verifiedExtensionPaths.push(extensionPath);
+        } else {
+          const message = `Extension "${extension.name}" path is missing and will be skipped.`;
+          logger.warn(message);
+          bridgeMessageToUI({
+            type: 'warning',
+            text: message,
+          });
+        }
       }
       const launchParamter = buildBrowserLaunchParameters({
         managed: launchTarget.managed,

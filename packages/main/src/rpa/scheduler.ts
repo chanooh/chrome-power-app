@@ -198,7 +198,9 @@ export class RpaScheduler {
       const openResult = await openFingerprintWindow(binding.window_id);
       const browserWSEndpoint = openResult?.webSocketDebuggerUrl;
       if (!browserWSEndpoint) {
-        throw new Error(`Profile ${binding.window_id} did not return a CDP endpoint.`);
+        throw new Error(
+          `Profile ${binding.window_id} failed to start or did not expose a CDP endpoint. Check the launch warning shown before this RPA error.`,
+        );
       }
       connected = await connectRpaBrowser(browserWSEndpoint);
       const variables = mergeVariables(

@@ -157,7 +157,9 @@ class RpaRecorder {
   async startRecorder(windowId: number): Promise<RpaRecorderSession> {
     const openResult = await openFingerprintWindow(windowId);
     if (!openResult?.webSocketDebuggerUrl) {
-      throw new Error(`Profile ${windowId} did not return a CDP endpoint.`);
+      throw new Error(
+        `Profile ${windowId} failed to start or did not expose a CDP endpoint. Check the launch warning shown before this RPA error.`,
+      );
     }
     const connected = await connectRpaBrowser(openResult.webSocketDebuggerUrl);
     const sessionId = `rec-${windowId}-${Date.now()}`;
