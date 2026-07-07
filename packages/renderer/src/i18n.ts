@@ -118,6 +118,7 @@ i18n
           menu_settings: 'Settings',
           menu_logs: 'Running Logs',
           menu_sync: 'Auto Arrange',
+          menu_rpa: 'RPA',
           menu_api: 'API',
 
           header_language: 'Language',
@@ -333,6 +334,7 @@ i18n
           menu_proxy: '代理设置',
           menu_extensions: '扩展管理',
           menu_sync: '窗口同步',
+          menu_rpa: 'RPA 自动化',
           menu_logs: '运行日志',
           menu_settings: '设置',
           menu_api: 'API',

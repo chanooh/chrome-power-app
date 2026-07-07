@@ -12,6 +12,7 @@ import Logs from '../pages/logs';
 import Start from '../pages/start';
 import Api from '../pages/api';
 import Extensions from '../pages/extensions';
+import Rpa from '../pages/rpa';
 interface RouteOption {
   path: string;
   name?: string;
@@ -66,6 +67,12 @@ export const useRoutes = () => {
         name: t('menu_sync'),
         icon: <Icon icon="ic:outline-sync" />,
         component: Sync,
+      },
+      {
+        path: '/rpa',
+        name: t('menu_rpa'),
+        icon: <Icon icon="mdi:robot-outline" />,
+        component: Rpa,
       },
       {
         path: '/logs',

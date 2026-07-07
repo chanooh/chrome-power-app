@@ -1,6 +1,13 @@
 // types/models.d.ts
 import type {MacDeviceTemplateId} from './fingerprint';
 import type {ExtensionSourceType} from './extension';
+import type {
+  RpaClosePolicy,
+  RpaRunStatus,
+  RpaScreenshotPolicy,
+  RpaStepStatus,
+  RpaStepType,
+} from './rpa';
 
 export namespace DB {
   export interface Window {
@@ -95,6 +102,86 @@ export namespace DB {
     id?: number;
     extension_id?: number;
     window_id?: number;
+  }
+
+  export interface RpaTask {
+    id?: number;
+    name: string;
+    description?: string | null;
+    flow_json: string;
+    default_concurrency?: number;
+    default_timeout_ms?: number;
+    default_retry?: number;
+    screenshot_policy?: RpaScreenshotPolicy;
+    close_policy?: RpaClosePolicy;
+    variables_json?: string | null;
+    sensitive_variables_encrypted?: string | null;
+    status?: number;
+    created_at?: string;
+    updated_at?: string | null;
+  }
+
+  export interface RpaTaskProfile {
+    id?: number;
+    task_id: number;
+    window_id: number;
+    variables_json?: string | null;
+    sensitive_variables_encrypted?: string | null;
+    created_at?: string;
+  }
+
+  export interface RpaRun {
+    id?: number;
+    task_id: number;
+    status: RpaRunStatus;
+    total_profiles?: number;
+    succeeded_profiles?: number;
+    failed_profiles?: number;
+    artifact_root?: string | null;
+    options_json?: string | null;
+    message?: string | null;
+    started_at?: string | null;
+    finished_at?: string | null;
+    created_at?: string;
+    updated_at?: string | null;
+  }
+
+  export interface RpaRunProfile {
+    id?: number;
+    run_id: number;
+    task_id: number;
+    window_id: number;
+    profile_id?: string | null;
+    status: RpaRunStatus;
+    current_step_index?: number;
+    artifact_dir?: string | null;
+    error?: string | null;
+    started_at?: string | null;
+    finished_at?: string | null;
+    created_at?: string;
+    updated_at?: string | null;
+  }
+
+  export interface RpaRunStep {
+    id?: number;
+    run_id: number;
+    run_profile_id: number;
+    task_id: number;
+    window_id: number;
+    step_id: string;
+    step_index: number;
+    step_type: RpaStepType;
+    status: RpaStepStatus;
+    attempt?: number;
+    duration_ms?: number;
+    message?: string | null;
+    error?: string | null;
+    artifact_path?: string | null;
+    output_json?: string | null;
+    started_at?: string | null;
+    finished_at?: string | null;
+    created_at?: string;
+    updated_at?: string | null;
   }
 }
 

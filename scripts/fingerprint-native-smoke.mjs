@@ -11,6 +11,22 @@ const VERSION = '150.0.7871.47';
 const EXECUTABLE_PATH = `/Volumes/F/ChromePowerCore/chromium/${VERSION}/mac-arm64/Chromium.app/Contents/MacOS/Chromium`;
 const PROFILE_ROOT = '/Volumes/F/ChromePowerCache/native-smoke';
 
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+const removeProfileDir = async path => {
+  let lastError;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    try {
+      rmSync(path, {recursive: true, force: true});
+      return;
+    } catch (error) {
+      lastError = error;
+      await sleep(250);
+    }
+  }
+  throw lastError;
+};
+
 const snapshot = {
   schemaVersion: 2,
   fingerprintEngineVersion: 'native-macos-v2',
@@ -276,5 +292,5 @@ try {
   if (child && child.exitCode === null) {
     child.kill('SIGTERM');
   }
-  rmSync(profileDir, {recursive: true, force: true});
+  await removeProfileDir(profileDir);
 }
