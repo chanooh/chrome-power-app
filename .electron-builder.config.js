@@ -37,6 +37,8 @@ module.exports = async function () {
       'node_modules/sqlite3/lib/binding/**/*.node',
       'node_modules/@tkomde/iohook/**/*.node',
       'node_modules/iconv-corefoundation/lib/*.node',
+      'node_modules/playwright/**/*',
+      'node_modules/playwright-core/**/*',
       'buildResources/**/*',
     ],
     extraResources: [

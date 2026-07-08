@@ -15,14 +15,19 @@ let PORT = 5173;
 
 // 仅在生产环境下启动Express服务器
 async function findAvailablePortAndStartServer() {
-  if (!isDev) {
-    PORT = await portscanner.findAPortNotInUse(5173, 8000);
-    server.use(express.static(resolve(__dirname, '../../renderer/dist')));
-    server.listen(PORT, () => {
+  if (isDev || serverStarted) {
+    return;
+  }
+  PORT = await portscanner.findAPortNotInUse(5173, 8000);
+  server.use(express.static(resolve(__dirname, '../../renderer/dist')));
+  await new Promise<void>((resolveServer, rejectServer) => {
+    const httpServer = server.listen(PORT, () => {
       console.log(`Server running on http://localhost:${PORT}`);
       serverStarted = true;
+      resolveServer();
     });
-  }
+    httpServer.once('error', rejectServer);
+  });
 }
 
 async function createWindow() {
@@ -110,7 +115,8 @@ async function createWindow() {
   });
 
   browserWindow.webContents?.on('will-navigate', (event, url) => {
-    if (url !== browserWindow.webContents.getURL()) {
+    const currentUrl = browserWindow.webContents.getURL();
+    if (currentUrl && currentUrl !== 'about:blank' && url !== currentUrl) {
       event.preventDefault();
       shell.openExternal(url);
     }
