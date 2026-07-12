@@ -257,12 +257,9 @@ class MacWindowSyncService {
     }
     try {
       const native = this.nativeManager.getPermissionStatus();
-      const accessibility =
-        native.accessibility && systemPreferences.isTrustedAccessibilityClient(false);
       return {
         ...native,
-        accessibility,
-        ready: accessibility && native.listenEvents && native.postEvents,
+        ready: native.accessibility && native.listenEvents && native.postEvents,
       };
     } catch {
       return {

@@ -167,6 +167,14 @@ const SyncPage = () => {
     };
   }, [status.active]);
 
+  useEffect(() => {
+    if (permissions.ready || !capabilities?.supported) return;
+    const timer = setInterval(() => {
+      void SyncBridge.getPermissionStatus().then(setPermissions);
+    }, 1_000);
+    return () => clearInterval(timer);
+  }, [capabilities?.supported, permissions.ready]);
+
   const handleStart = useCallback(async () => {
     if (!masterWindowId) {
       message.warning(t('sync_msg_set_master_first'));
@@ -314,6 +322,11 @@ const SyncPage = () => {
   ];
 
   const permissionAlert = !permissions.ready && capabilities?.supported;
+  const missingPermissions = [
+    !permissions.accessibility && 'Accessibility',
+    !permissions.listenEvents && 'Input Monitoring',
+    !permissions.postEvents && 'Post Events',
+  ].filter(Boolean);
   const canStart =
     !!masterWindowId &&
     permissions.ready &&
@@ -382,7 +395,7 @@ const SyncPage = () => {
           type="warning"
           showIcon
           icon={<SafetyCertificateOutlined />}
-          message="Accessibility and Input Monitoring permissions are required."
+          message={`Missing permission: ${missingPermissions.join(', ') || 'checking...'}`}
           action={
             <Space>
               <Button
