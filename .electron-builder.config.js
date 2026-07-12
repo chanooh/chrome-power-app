@@ -28,17 +28,17 @@ module.exports = async function () {
       buildResources: 'buildResources',
     },
     nodeGypRebuild: false, // Disable node-gyp rebuild, use prebuilt binaries
-    npmRebuild: false, // Disable @electron/rebuild to skip iohook compilation
+    npmRebuild: false, // Native modules are built explicitly before packaging.
     files: [
       'packages/**/dist/**',
       'packages/**/assets/**',
       'migrations',
       'package.json',
       'node_modules/sqlite3/lib/binding/**/*.node',
-      'node_modules/@tkomde/iohook/**/*.node',
       'node_modules/iconv-corefoundation/lib/*.node',
       'node_modules/playwright/**/*',
       'node_modules/playwright-core/**/*',
+      'node_modules/ws/**/*',
       'buildResources/**/*',
     ],
     extraResources: [
@@ -103,7 +103,7 @@ module.exports = async function () {
         },
       ],
       category: 'public.app-category.developer-tools',
-      hardenedRuntime: true, 
+      hardenedRuntime: true,
       gatekeeperAssess: false,
       entitlements: 'buildResources/entitlements.mac.plist',
       entitlementsInherit: 'buildResources/entitlements.mac.plist',
@@ -156,24 +156,30 @@ module.exports = async function () {
     },
 
     // 在打包后复制 window-addon.node 到最终目录
-    afterPack: async (context) => {
+    afterPack: async context => {
       const fs = require('fs');
       const path = require('path');
-      const { electronPlatformName, arch, appOutDir } = context;
+      const {electronPlatformName, arch, appOutDir} = context;
 
       // electron-builder 的 arch 是数字枚举，需要转换为字符串
-      const archMap = { 0: 'ia32', 1: 'x64', 2: 'armv7l', 3: 'arm64', 4: 'universal' };
+      const archMap = {0: 'ia32', 1: 'x64', 2: 'armv7l', 3: 'arm64', 4: 'universal'};
       const archString = archMap[arch] || String(arch);
 
       console.log(`Copying window-addon for ${electronPlatformName}-${archString}...`);
 
-      const sourcePath = path.join(__dirname, `packages/main/src/native-addon/build/Release/${electronPlatformName}-${archString}/window-addon.node`);
+      const sourcePath = path.join(
+        __dirname,
+        `packages/main/src/native-addon/build/Release/${electronPlatformName}-${archString}/window-addon.node`,
+      );
 
       // Mac 应用有 .app 包结构，需要特殊处理路径
       let targetDir;
       if (electronPlatformName === 'darwin') {
         const appName = context.packager.appInfo.productFilename;
-        targetDir = path.join(appOutDir, `${appName}.app/Contents/Resources/app.asar.unpacked/node_modules/window-addon`);
+        targetDir = path.join(
+          appOutDir,
+          `${appName}.app/Contents/Resources/app.asar.unpacked/node_modules/window-addon`,
+        );
       } else {
         targetDir = path.join(appOutDir, 'resources/app.asar.unpacked/node_modules/window-addon');
       }
@@ -189,7 +195,7 @@ module.exports = async function () {
 
         // 创建目标目录
         if (!fs.existsSync(targetDir)) {
-          fs.mkdirSync(targetDir, { recursive: true });
+          fs.mkdirSync(targetDir, {recursive: true});
           console.log(`Created directory: ${targetDir}`);
         }
 
@@ -233,7 +239,7 @@ module.exports = async function () {
   //       darkModeSupport: true,
   //     };
   //   }
-    
+
   //   config.dmg = {
   //     sign: false,
   //     writeUpdateInfo: false,

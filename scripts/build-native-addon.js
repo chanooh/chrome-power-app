@@ -9,7 +9,8 @@
  * 4. 将构建好的模块移动到对应目录
  */
 
-const { execSync } = require('child_process');
+const {execSync} = require('child_process');
+const fs = require('fs');
 const path = require('path');
 const dotenv = require('dotenv');
 
@@ -19,6 +20,8 @@ dotenv.config();
 // 获取平台和架构信息
 const platform = process.env.ELECTRON_PLATFORM || process.platform;
 const arch = process.env.ELECTRON_ARCH || process.arch;
+const forceRebuild =
+  process.argv.includes('--force') || process.env.FORCE_NATIVE_ADDON_BUILD === '1';
 
 console.log(`构建原生模块 (平台: ${platform}, 架构: ${arch})`);
 
@@ -31,82 +34,90 @@ const releaseDir = path.join(buildDir, 'Release');
 const targetDir = path.join(releaseDir, `${platform}-${arch}`);
 const sourcePath = path.join(releaseDir, 'window-addon.node');
 
-try {
-  // 检查是否已经存在构建好的文件
-  const fs = require('fs');
-  const targetAddonPath = path.join(targetDir, 'window-addon.node');
+const verifyOutput = targetAddonPath => {
+  if (!fs.existsSync(targetAddonPath)) throw new Error('Native addon output is missing');
+  if (platform !== 'darwin') return;
+  const architectures = execSync(`lipo -archs "${targetAddonPath}"`, {encoding: 'utf8'})
+    .trim()
+    .split(/\s+/);
+  if (!architectures.includes(arch)) {
+    throw new Error(
+      `Native addon architecture mismatch: expected ${arch}, got ${architectures.join(', ')}`,
+    );
+  }
+  console.log(`✓ Native addon architecture verified: ${arch}`);
+};
 
-  if (fs.existsSync(targetAddonPath)) {
-    console.log(`✓ Native addon already exists at ${targetAddonPath}`);
-    console.log('Skipping rebuild to avoid file lock issues');
+try {
+  const targetAddonPath = path.join(targetDir, 'window-addon.node');
+  const sourceFiles = ['window-addon.cpp', 'binding.gyp'].map(file =>
+    path.join(nativeAddonDir, file),
+  );
+  const newestSourceMtime = Math.max(...sourceFiles.map(file => fs.statSync(file).mtimeMs));
+  const targetIsCurrent =
+    fs.existsSync(targetAddonPath) && fs.statSync(targetAddonPath).mtimeMs >= newestSourceMtime;
+
+  if (targetIsCurrent && !forceRebuild) {
+    console.log(`✓ Native addon is current at ${targetAddonPath}`);
+    verifyOutput(targetAddonPath);
     process.exit(0);
   }
 
   // 根据不同平台和架构执行不同的构建命令
   console.log(`开始为 ${platform}-${arch} 构建原生模块...`);
 
-  try {
-    if (platform === 'win32') {
-      console.log('在 Windows 平台构建原生模块...');
-      execSync('npm run build:native-addon', { stdio: 'inherit' });
-    } else if (platform === 'darwin') {
-      if (arch === 'arm64') {
-        console.log('在 macOS (arm64) 构建原生模块...');
-        execSync('npm run build:native-addon:mac-arm64', { stdio: 'inherit' });
-      } else if (arch === 'x64') {
-        console.log('在 macOS (x64) 构建原生模块...');
-        execSync('npm run build:native-addon:mac-x64', { stdio: 'inherit' });
-      } else {
-        console.log(`在 macOS (${arch}) 构建原生模块...`);
-        execSync('npm run build:native-addon', { stdio: 'inherit' });
-      }
+  if (platform === 'win32') {
+    console.log('在 Windows 平台构建原生模块...');
+    execSync('npm run build:native-addon', {stdio: 'inherit'});
+  } else if (platform === 'darwin') {
+    if (arch === 'arm64') {
+      console.log('在 macOS (arm64) 构建原生模块...');
+      execSync('npm run build:native-addon:mac-arm64', {stdio: 'inherit'});
+    } else if (arch === 'x64') {
+      console.log('在 macOS (x64) 构建原生模块...');
+      execSync('npm run build:native-addon:mac-x64', {stdio: 'inherit'});
     } else {
-      // 其他平台的处理
-      console.log(`在 ${platform} 平台构建原生模块...`);
-      execSync('npm run build:native-addon', { stdio: 'inherit' });
+      console.log(`在 macOS (${arch}) 构建原生模块...`);
+      execSync('npm run build:native-addon', {stdio: 'inherit'});
     }
-  } catch (buildError) {
-    // Check if source file exists even though build failed
-    if (fs.existsSync(sourcePath)) {
-      console.warn('Build command failed, but source file exists. Continuing...');
-    } else {
-      throw buildError;
-    }
+  } else {
+    console.log(`在 ${platform} 平台构建原生模块...`);
+    execSync('npm run build:native-addon', {stdio: 'inherit'});
   }
-  
+
   console.log('构建命令执行完成，检查输出文件...');
-  
+
   // 使用命令行列出目录内容
   if (platform === 'win32') {
-    execSync(`dir "${buildDir}"`, { stdio: 'inherit' });
-    execSync(`dir "${releaseDir}"`, { stdio: 'inherit' });
+    execSync(`dir "${buildDir}"`, {stdio: 'inherit'});
+    execSync(`dir "${releaseDir}"`, {stdio: 'inherit'});
   } else {
-    execSync(`ls -la "${buildDir}"`, { stdio: 'inherit' });
-    execSync(`ls -la "${releaseDir}"`, { stdio: 'inherit' });
+    execSync(`ls -la "${buildDir}"`, {stdio: 'inherit'});
+    execSync(`ls -la "${releaseDir}"`, {stdio: 'inherit'});
   }
 
   // 使用命令行创建目录和复制文件
   console.log('创建目标目录并复制文件...');
   if (platform === 'win32') {
-    execSync(`mkdir "${targetDir}" 2>nul || echo "Directory already exists"`, { stdio: 'inherit' });
-    execSync(`copy "${sourcePath}" "${targetDir}\\window-addon.node"`, { stdio: 'inherit' });
+    execSync(`mkdir "${targetDir}" 2>nul || echo "Directory already exists"`, {stdio: 'inherit'});
+    execSync(`copy "${sourcePath}" "${targetDir}\\window-addon.node"`, {stdio: 'inherit'});
   } else {
-    execSync(`mkdir -p "${targetDir}"`, { stdio: 'inherit' });
-    execSync(`cp "${sourcePath}" "${targetDir}/window-addon.node"`, { stdio: 'inherit' });
+    execSync(`mkdir -p "${targetDir}"`, {stdio: 'inherit'});
+    execSync(`cp "${sourcePath}" "${targetDir}/window-addon.node"`, {stdio: 'inherit'});
   }
 
   // 验证文件已复制
   console.log('验证文件已复制...');
   if (platform === 'win32') {
-    execSync(`dir "${targetDir}"`, { stdio: 'inherit' });
+    execSync(`dir "${targetDir}"`, {stdio: 'inherit'});
   } else {
-    execSync(`ls -la "${targetDir}"`, { stdio: 'inherit' });
+    execSync(`ls -la "${targetDir}"`, {stdio: 'inherit'});
   }
+
+  verifyOutput(targetAddonPath);
 
   console.log('原生模块构建和组织完成！');
 } catch (error) {
   console.error('构建过程中发生错误:', error);
-  console.error('This is not critical if the addon already exists or will be built later');
-  // Don't exit with error code to allow npm install to continue
-  process.exit(0);
+  process.exit(1);
 }

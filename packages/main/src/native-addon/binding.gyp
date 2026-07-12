@@ -25,7 +25,7 @@
               "-L/usr/local/lib",
               "-L/opt/homebrew/lib"
             ],
-            "MACOSX_DEPLOYMENT_TARGET": "10.13",
+            "MACOSX_DEPLOYMENT_TARGET": "10.15",
             "GCC_ENABLE_CPP_EXCEPTIONS": "YES",
             "CLANG_CXX_LIBRARY": "libc++",
             "CLANG_CXX_LANGUAGE_STANDARD": "c++17",

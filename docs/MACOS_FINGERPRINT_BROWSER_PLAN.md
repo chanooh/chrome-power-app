@@ -60,7 +60,7 @@
 - 收紧 CORS，避免任意来源访问。
 - 清理键盘 / 鼠标同步模块里的详细事件日志，尤其是键盘事件。
 - 明确生产环境自动更新策略，避免未经确认的二进制更新。
-- 保持 `@tkomde/iohook` 版本固定为 `1.1.7`，不要自动升级。
+- macOS 全局输入仅使用项目自有 `window-addon`，不引入第三方全局键盘监听库。
 - 继续保持 `.npmrc` 中 `ignore-scripts=true`，避免依赖安装阶段自动下载或执行脚本。
 - 对 native binary 建立受控构建或校验流程，至少记录来源、版本、hash。
 
@@ -68,7 +68,7 @@
 
 - 本地 API 无 token 时不可调用。
 - 服务不绑定 `0.0.0.0`。
-- 依赖安装不会自动执行 `@tkomde/iohook` 下载脚本。
+- 依赖安装不会下载或构建第三方全局输入监听库。
 - 日志中不记录原始键盘事件内容。
 
 ### P1：可控浏览器内核
@@ -239,7 +239,7 @@
 - 不建议先堆很多指纹参数开关，容易制造不一致 profile。
 - 不建议继续扩大本机 Chrome 依赖，后续迁移到固定浏览器核心会返工。
 - 不建议在没有 API token 的情况下开放更多本地接口。
-- 不建议自动升级 `@tkomde/iohook` 或其他 native 依赖。
+- 不建议引入自动下载或自动升级的第三方 native 输入依赖。
 
 ## 参考代码位置
 
@@ -251,4 +251,3 @@
 - 多窗口同步：`packages/main/src/services/multi-window-sync-service.ts`
 - preload bridge：`packages/preload/src/index.ts`
 - renderer 路由：`packages/renderer/src/routes/index.tsx`
-

@@ -1,5 +1,11 @@
 #include <napi.h>
 #include <iostream>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
+#include <vector>
 
 #ifdef __APPLE__
 #import <Foundation/Foundation.h>
@@ -7,6 +13,10 @@
 #import <CoreFoundation/CoreFoundation.h>
 #import <CoreGraphics/CoreGraphics.h>
 #endif
+
+namespace {
+constexpr int64_t kChromePowerSyntheticEventMarker = 0x43505231;
+}
 
 #ifdef _WIN32
 #include <windows.h>
@@ -83,7 +93,12 @@ public:
             InstanceMethod("getWindowBounds", &WindowManager::GetWindowBounds),
             InstanceMethod("getAllWindows", &WindowManager::GetAllWindows),
             InstanceMethod("getMonitors", &WindowManager::GetMonitorsJS),
-            InstanceMethod("isProcessWindowActive", &WindowManager::IsProcessWindowActive)
+            InstanceMethod("isProcessWindowActive", &WindowManager::IsProcessWindowActive),
+            InstanceMethod("startEventCapture", &WindowManager::StartEventCapture),
+            InstanceMethod("stopEventCapture", &WindowManager::StopEventCapture),
+            InstanceMethod("getPermissionStatus", &WindowManager::GetPermissionStatus),
+            InstanceMethod("requestListenAccess", &WindowManager::RequestListenAccess),
+            InstanceMethod("requestPostAccess", &WindowManager::RequestPostAccess)
         });
 
         Napi::FunctionReference* constructor = new Napi::FunctionReference();
@@ -96,7 +111,291 @@ public:
 
     WindowManager(const Napi::CallbackInfo& info) : Napi::ObjectWrap<WindowManager>(info) {}
 
+    ~WindowManager() override {
+        StopEventCaptureInternal();
+    }
+
 private:
+#ifdef __APPLE__
+    struct CapturedEvent {
+        CGEventType type;
+        double x;
+        double y;
+        int64_t button;
+        int64_t clickCount;
+        int64_t deltaX;
+        int64_t deltaY;
+        int64_t keyCode;
+        uint64_t flags;
+        uint64_t timestamp;
+        int64_t sourcePid;
+        std::vector<UniChar> text;
+    };
+
+    std::atomic<bool> eventCaptureRunning_{false};
+    std::thread eventCaptureThread_;
+    std::mutex eventCaptureMutex_;
+    std::condition_variable eventCaptureReady_;
+    CFMachPortRef eventTap_ = nullptr;
+    CFRunLoopSourceRef eventTapSource_ = nullptr;
+    CFRunLoopRef eventCaptureRunLoop_ = nullptr;
+    Napi::ThreadSafeFunction eventCallback_;
+
+    static const char* EventTypeName(CGEventType type) {
+        switch (type) {
+            case kCGEventLeftMouseDown: return "leftMouseDown";
+            case kCGEventLeftMouseUp: return "leftMouseUp";
+            case kCGEventRightMouseDown: return "rightMouseDown";
+            case kCGEventRightMouseUp: return "rightMouseUp";
+            case kCGEventOtherMouseDown: return "otherMouseDown";
+            case kCGEventOtherMouseUp: return "otherMouseUp";
+            case kCGEventMouseMoved: return "mouseMoved";
+            case kCGEventLeftMouseDragged: return "leftMouseDragged";
+            case kCGEventRightMouseDragged: return "rightMouseDragged";
+            case kCGEventOtherMouseDragged: return "otherMouseDragged";
+            case kCGEventScrollWheel: return "scrollWheel";
+            case kCGEventKeyDown: return "keyDown";
+            case kCGEventKeyUp: return "keyUp";
+            case kCGEventFlagsChanged: return "flagsChanged";
+            default: return "unknown";
+        }
+    }
+
+    static CGEventRef EventTapCallback(
+        CGEventTapProxy,
+        CGEventType type,
+        CGEventRef event,
+        void* userInfo
+    ) {
+        auto* self = static_cast<WindowManager*>(userInfo);
+        if (!self || !event) return event;
+
+        if (type == kCGEventTapDisabledByTimeout || type == kCGEventTapDisabledByUserInput) {
+            if (self->eventTap_ && self->eventCaptureRunning_.load()) {
+                CGEventTapEnable(self->eventTap_, true);
+            }
+            return event;
+        }
+
+        if (!self->eventCaptureRunning_.load()) return event;
+        if (CGEventGetIntegerValueField(event, kCGEventSourceUserData) == kChromePowerSyntheticEventMarker) {
+            return event;
+        }
+
+        auto* data = new CapturedEvent();
+        CGPoint location = CGEventGetLocation(event);
+        data->type = type;
+        data->x = location.x;
+        data->y = location.y;
+        data->button = CGEventGetIntegerValueField(event, kCGMouseEventButtonNumber);
+        data->clickCount = CGEventGetIntegerValueField(event, kCGMouseEventClickState);
+        data->deltaX = CGEventGetIntegerValueField(event, kCGScrollWheelEventPointDeltaAxis2);
+        data->deltaY = CGEventGetIntegerValueField(event, kCGScrollWheelEventPointDeltaAxis1);
+        data->keyCode = CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
+        data->flags = static_cast<uint64_t>(CGEventGetFlags(event));
+        data->timestamp = CGEventGetTimestamp(event);
+        data->sourcePid = CGEventGetIntegerValueField(event, kCGEventSourceUnixProcessID);
+
+        if (type == kCGEventKeyDown) {
+            UniChar chars[64];
+            UniCharCount length = 0;
+            CGEventKeyboardGetUnicodeString(event, 64, &length, chars);
+            data->text.assign(chars, chars + length);
+        }
+
+        napi_status status = self->eventCallback_.NonBlockingCall(
+            data,
+            [](Napi::Env env, Napi::Function callback, CapturedEvent* captured) {
+                if (env && callback) {
+                    Napi::Object value = Napi::Object::New(env);
+                    value.Set("type", EventTypeName(captured->type));
+                    value.Set("x", captured->x);
+                    value.Set("y", captured->y);
+                    value.Set("button", Napi::Number::New(env, captured->button));
+                    value.Set("clickCount", Napi::Number::New(env, captured->clickCount));
+                    value.Set("deltaX", Napi::Number::New(env, captured->deltaX));
+                    value.Set("deltaY", Napi::Number::New(env, captured->deltaY));
+                    value.Set("keyCode", Napi::Number::New(env, captured->keyCode));
+                    value.Set("flags", Napi::Number::New(env, static_cast<double>(captured->flags)));
+                    value.Set("timestamp", Napi::Number::New(env, static_cast<double>(captured->timestamp)));
+                    value.Set("sourcePid", Napi::Number::New(env, captured->sourcePid));
+                    if (!captured->text.empty()) {
+                        value.Set(
+                            "text",
+                            Napi::String::New(
+                                env,
+                                reinterpret_cast<const char16_t*>(captured->text.data()),
+                                captured->text.size()
+                            )
+                        );
+                    }
+                    callback.Call({value});
+                }
+                delete captured;
+            }
+        );
+
+        if (status != napi_ok) delete data;
+        return event;
+    }
+
+    void StopEventCaptureInternal() {
+        if (!eventCaptureRunning_.exchange(false)) return;
+
+        {
+            std::lock_guard<std::mutex> lock(eventCaptureMutex_);
+            if (eventCaptureRunLoop_) CFRunLoopStop(eventCaptureRunLoop_);
+        }
+
+        if (eventCaptureThread_.joinable()) eventCaptureThread_.join();
+
+        if (eventTapSource_) {
+            CFRelease(eventTapSource_);
+            eventTapSource_ = nullptr;
+        }
+        if (eventTap_) {
+            CFRelease(eventTap_);
+            eventTap_ = nullptr;
+        }
+    }
+#else
+    void StopEventCaptureInternal() {}
+#endif
+
+    Napi::Value GetPermissionStatus(const Napi::CallbackInfo& info) {
+        Napi::Env env = info.Env();
+        Napi::Object result = Napi::Object::New(env);
+#ifdef __APPLE__
+        result.Set("accessibility", Napi::Boolean::New(env, AXIsProcessTrusted()));
+        result.Set("listenEvents", Napi::Boolean::New(env, CGPreflightListenEventAccess()));
+        result.Set("postEvents", Napi::Boolean::New(env, CGPreflightPostEventAccess()));
+        result.Set("supported", Napi::Boolean::New(env, true));
+#else
+        result.Set("accessibility", Napi::Boolean::New(env, false));
+        result.Set("listenEvents", Napi::Boolean::New(env, false));
+        result.Set("postEvents", Napi::Boolean::New(env, false));
+        result.Set("supported", Napi::Boolean::New(env, false));
+#endif
+        return result;
+    }
+
+    Napi::Value RequestListenAccess(const Napi::CallbackInfo& info) {
+        Napi::Env env = info.Env();
+#ifdef __APPLE__
+        return Napi::Boolean::New(env, CGRequestListenEventAccess());
+#else
+        return Napi::Boolean::New(env, false);
+#endif
+    }
+
+    Napi::Value RequestPostAccess(const Napi::CallbackInfo& info) {
+        Napi::Env env = info.Env();
+#ifdef __APPLE__
+        return Napi::Boolean::New(env, CGRequestPostEventAccess());
+#else
+        return Napi::Boolean::New(env, false);
+#endif
+    }
+
+    Napi::Value StartEventCapture(const Napi::CallbackInfo& info) {
+        Napi::Env env = info.Env();
+#ifdef __APPLE__
+        if (eventCaptureRunning_.load()) return Napi::Boolean::New(env, true);
+        if (info.Length() < 1 || !info[0].IsFunction()) {
+            Napi::TypeError::New(env, "startEventCapture requires a callback").ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+        if (!CGPreflightListenEventAccess()) {
+            Napi::Error::New(env, "Input Monitoring permission is required").ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+
+        CGEventMask mask =
+            CGEventMaskBit(kCGEventLeftMouseDown) |
+            CGEventMaskBit(kCGEventLeftMouseUp) |
+            CGEventMaskBit(kCGEventRightMouseDown) |
+            CGEventMaskBit(kCGEventRightMouseUp) |
+            CGEventMaskBit(kCGEventOtherMouseDown) |
+            CGEventMaskBit(kCGEventOtherMouseUp) |
+            CGEventMaskBit(kCGEventMouseMoved) |
+            CGEventMaskBit(kCGEventLeftMouseDragged) |
+            CGEventMaskBit(kCGEventRightMouseDragged) |
+            CGEventMaskBit(kCGEventOtherMouseDragged) |
+            CGEventMaskBit(kCGEventScrollWheel) |
+            CGEventMaskBit(kCGEventKeyDown) |
+            CGEventMaskBit(kCGEventKeyUp) |
+            CGEventMaskBit(kCGEventFlagsChanged);
+
+        eventTap_ = CGEventTapCreate(
+            kCGSessionEventTap,
+            kCGHeadInsertEventTap,
+            kCGEventTapOptionListenOnly,
+            mask,
+            EventTapCallback,
+            this
+        );
+        if (!eventTap_) {
+            Napi::Error::New(env, "Unable to create macOS event tap").ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+
+        eventTapSource_ = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, eventTap_, 0);
+        if (!eventTapSource_) {
+            CFRelease(eventTap_);
+            eventTap_ = nullptr;
+            Napi::Error::New(env, "Unable to create event tap run loop source").ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+
+        eventCallback_ = Napi::ThreadSafeFunction::New(
+            env,
+            info[0].As<Napi::Function>(),
+            "ChromePowerMacInput",
+            0,
+            1
+        );
+        eventCaptureRunning_.store(true);
+        eventCaptureThread_ = std::thread([this]() {
+            @autoreleasepool {
+                CFRunLoopRef runLoop = CFRunLoopGetCurrent();
+                CFRetain(runLoop);
+                {
+                    std::lock_guard<std::mutex> lock(eventCaptureMutex_);
+                    eventCaptureRunLoop_ = runLoop;
+                }
+                eventCaptureReady_.notify_all();
+                CFRunLoopAddSource(runLoop, eventTapSource_, kCFRunLoopCommonModes);
+                CGEventTapEnable(eventTap_, true);
+                CFRunLoopRun();
+                CFRunLoopRemoveSource(runLoop, eventTapSource_, kCFRunLoopCommonModes);
+                {
+                    std::lock_guard<std::mutex> lock(eventCaptureMutex_);
+                    eventCaptureRunLoop_ = nullptr;
+                }
+                CFRelease(runLoop);
+                eventCallback_.Release();
+            }
+        });
+
+        {
+            std::unique_lock<std::mutex> lock(eventCaptureMutex_);
+            eventCaptureReady_.wait_for(
+                lock,
+                std::chrono::seconds(1),
+                [this]() { return eventCaptureRunLoop_ != nullptr; }
+            );
+        }
+        return Napi::Boolean::New(env, eventCaptureRunLoop_ != nullptr);
+#else
+        return Napi::Boolean::New(env, false);
+#endif
+    }
+
+    Napi::Value StopEventCapture(const Napi::CallbackInfo& info) {
+        StopEventCaptureInternal();
+        return Napi::Boolean::New(info.Env(), true);
+    }
+
     #ifdef _WIN32
     bool ArrangeWindow(HWND hwnd, int x, int y, int width, int height, bool preserveSize = false) {
         if (!hwnd) return false;
@@ -995,14 +1294,8 @@ private:
 
         CGEventRef event = CGEventCreateMouseEvent(NULL, cgEventType, point, button);
         if (event) {
-            // For click events (down/up), send directly to target process to avoid moving cursor
-            // For mousemove, we still use global event tap as CGEventPostToPid doesn't support it well
-            if (eventType == "mousemove") {
-                CGEventPost(kCGHIDEventTap, event);
-            } else {
-                // Send to specific process - this won't move the global cursor
-                CGEventPostToPid(pid, event);
-            }
+            CGEventSetIntegerValueField(event, kCGEventSourceUserData, kChromePowerSyntheticEventMarker);
+            CGEventPostToPid(pid, event);
             CFRelease(event);
         }
 #endif
@@ -1137,9 +1430,25 @@ private:
 #elif __APPLE__
         CGEventRef event;
         bool isKeyDown = (eventType == "keydown");
+        CGEventFlags flags = 0;
+        if (info.Length() >= 6 && info[5].IsNumber()) {
+            flags = static_cast<CGEventFlags>(info[5].As<Napi::Number>().Int64Value());
+        }
 
         event = CGEventCreateKeyboardEvent(NULL, (CGKeyCode)keyCode, isKeyDown);
         if (event) {
+            CGEventSetIntegerValueField(event, kCGEventSourceUserData, kChromePowerSyntheticEventMarker);
+            CGEventSetFlags(event, flags);
+            if (info.Length() >= 7 && info[6].IsString()) {
+                std::u16string text = info[6].As<Napi::String>().Utf16Value();
+                if (!text.empty()) {
+                    CGEventKeyboardSetUnicodeString(
+                        event,
+                        text.size(),
+                        reinterpret_cast<const UniChar*>(text.data())
+                    );
+                }
+            }
             // Send keyboard event directly to target process to avoid affecting global system
             CGEventPostToPid(pid, event);
             CFRelease(event);
@@ -1215,6 +1524,7 @@ private:
 
         event = CGEventCreateKeyboardEvent(NULL, (CGKeyCode)keyCode, isKeyDown);
         if (event) {
+            CGEventSetIntegerValueField(event, kCGEventSourceUserData, kChromePowerSyntheticEventMarker);
             CGEventPost(kCGHIDEventTap, event);
             CFRelease(event);
         }
@@ -1284,6 +1594,7 @@ private:
 #elif __APPLE__
         CGEventRef event = CGEventCreateScrollWheelEvent(NULL, kCGScrollEventUnitPixel, 2, deltaY, deltaX);
         if (event) {
+            CGEventSetIntegerValueField(event, kCGEventSourceUserData, kChromePowerSyntheticEventMarker);
             // Send scroll event directly to target process
             CGEventPostToPid(pid, event);
             CFRelease(event);

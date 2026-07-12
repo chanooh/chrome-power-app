@@ -13,12 +13,15 @@
     "build:native-addon": "cd ./packages/main/src/native-addon && node-gyp clean && node-gyp configure && node-gyp build",
     "build:native-addon:mac-x64": "cd ./packages/main/src/native-addon && node-gyp clean && SDKROOT=$(xcrun --sdk macosx --show-sdk-path) CFLAGS=\"-arch x86_64\" CXXFLAGS=\"-arch x86_64\" LDFLAGS=\"-arch x86_64\" npm_config_arch=x64 node-gyp configure && SDKROOT=$(xcrun --sdk macosx --show-sdk-path) CFLAGS=\"-arch x86_64\" CXXFLAGS=\"-arch x86_64\" LDFLAGS=\"-arch x86_64\" npm_config_arch=x64 node-gyp build",
     "build:native-addon:mac-arm64": "cd ./packages/main/src/native-addon && node-gyp clean && node-gyp configure && node-gyp build --arch=arm64",
+    "build:native-addon:current": "node scripts/build-native-addon.js --force",
     "build": "npm run build:main && npm run build:preload && npm run build:renderer",
     "build:main": "cd ./packages/main && vite build",
     "build:preload": "cd ./packages/preload && vite build",
     "build:renderer": "cd ./packages/renderer && vite build",
     "compile": "cross-env MODE=production npm run build && electron-builder build --config .electron-builder.config.js --dir --config.asar=false",
-    "package": "cross-env MODE=production npm run build && electron-builder --config .electron-builder.config.js --publish never",
+    "package": "npm run build:native-addon:current && cross-env MODE=production npm run build && electron-builder --config .electron-builder.config.js --publish never",
+    "package:mac:local": "npm run build:native-addon:current && cross-env MODE=production npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --config .electron-builder.config.js --dir --arm64 && codesign --force --deep --sign \"Chrome Power Local\" --options runtime --entitlements buildResources/entitlements.mac.plist \"dist/mac-arm64/Chrome Power.app\" && codesign --verify --deep --strict --verbose=2 \"dist/mac-arm64/Chrome Power.app\"",
+    "macos:setup-local-signing": "node scripts/macos-local-signing.mjs",
     "test": "cross-env MODE=production npm run test:main && npm run test:preload && npm run test:renderer && npm run test:e2e",
     "test:e2e": "npm run build && vitest run",
     "test:main": "vitest run -r packages/main --passWithNoTests",
@@ -35,6 +38,7 @@
     "chromium:verify": "node scripts/chromium-core.mjs verify",
     "chromium:fingerprint-smoke": "node scripts/fingerprint-native-smoke.mjs",
     "rpa:smoke": "node scripts/rpa-smoke.mjs",
+    "sync:mac:smoke": "node scripts/sync-mac-smoke.mjs",
     "lint": "eslint . --ext js,mjs,cjs,ts,mts,cts,vue",
     "typecheck:main": "tsc --noEmit -p packages/main/tsconfig.json",
     "typecheck:preload": "tsc --noEmit -p packages/preload/tsconfig.json",
@@ -57,6 +61,7 @@
     "@types/react": "^18.2.22",
     "@types/react-dom": "^18.2.7",
     "@types/react-redux": "^7.1.30",
+    "@types/ws": "8.18.1",
     "@typescript-eslint/eslint-plugin": "6.7.2",
     "autoprefixer": "^10.4.16",
     "cross-env": "7.0.3",
@@ -79,7 +84,6 @@
   },
   "dependencies": {
     "@reduxjs/toolkit": "^1.9.7",
-    "@tkomde/iohook": "1.1.7",
     "@types/portscanner": "^2.1.2",
     "@vitejs/plugin-react": "^4.0.4",
     "agent-base": "^7.1.0",
@@ -124,6 +128,7 @@
     "socks-proxy-agent": "^8.0.2",
     "sqlite3": "^5.1.6",
     "user-agents": "^1.1.148",
+    "ws": "8.21.0",
     "winston": "^3.11.0",
     "xlsx": "^0.18.5"
   },
@@ -132,24 +137,7 @@
       "buildResources": "buildResources"
     }
   },
-  "overrides": {
-    "@tkomde/iohook": "1.1.7"
-  },
   "optionalDependencies": {
     "dmg-license": "^1.0.11"
-  },
-  "iohook": {
-    "targets": [
-      "electron-125"
-    ],
-    "platforms": [
-      "win32",
-      "darwin",
-      "linux"
-    ],
-    "arches": [
-      "x64",
-      "arm64"
-    ]
   }
 }
