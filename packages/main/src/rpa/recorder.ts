@@ -13,6 +13,7 @@ import type {
 import {openFingerprintWindow} from '../fingerprint';
 import {appendRpaRecorderEvent} from './recorder-events';
 import {classifyRpaPageUrl, DEFAULT_RPA_RECORDER_SESSION_MODE} from './session';
+import {profileLeaseRegistry} from '../automation/profile-lease';
 
 interface RpaRecorderConnection {
   browser: PuppeteerBrowser;
@@ -40,7 +41,9 @@ const isSensitiveSelector = (selector?: string) =>
 
 const shouldRecordNavigation = (url?: string) => !!url && url !== 'about:blank';
 
-const connectRpaRecorderBrowser = async (browserWSEndpoint: string): Promise<RpaRecorderConnection> => {
+const connectRpaRecorderBrowser = async (
+  browserWSEndpoint: string,
+): Promise<RpaRecorderConnection> => {
   const browser = await puppeteer.connect({
     browserWSEndpoint,
     defaultViewport: null,
@@ -61,7 +64,10 @@ const connectRpaRecorderBrowser = async (browserWSEndpoint: string): Promise<Rpa
   };
 };
 
-const chooseExistingRecorderPage = async (browser: PuppeteerBrowser, fallbackPage: PuppeteerPage) => {
+const chooseExistingRecorderPage = async (
+  browser: PuppeteerBrowser,
+  fallbackPage: PuppeteerPage,
+) => {
   const pages = (await browser.pages()).filter(page => !page.isClosed());
   if (!fallbackPage.isClosed() && classifyRpaPageUrl(fallbackPage.url()) !== 'internal') {
     return fallbackPage;
@@ -368,30 +374,42 @@ const recorderScript = (bindingName: string) => `
 class RpaRecorder {
   private sessions = new Map<string, InternalRecorderSession>();
 
-  async startRecorder(windowId: number, options: RpaRecorderOptions = {}): Promise<RpaRecorderSession> {
-    const openResult = await openFingerprintWindow(windowId);
-    if (!openResult?.webSocketDebuggerUrl) {
-      throw new Error(
-        `Profile ${windowId} failed to start or did not expose a CDP endpoint. Check the launch warning shown before this RPA error.`,
-      );
-    }
-    const connected = await connectRpaRecorderBrowser(openResult.webSocketDebuggerUrl);
-    await prepareRecorderSession(connected, options.sessionMode || DEFAULT_RPA_RECORDER_SESSION_MODE);
+  async startRecorder(
+    windowId: number,
+    options: RpaRecorderOptions = {},
+  ): Promise<RpaRecorderSession> {
     const sessionId = `rec-${windowId}-${Date.now()}`;
-    const session: InternalRecorderSession = {
-      sessionId,
-      windowId,
-      startedAt: new Date().toISOString(),
-      events: [],
-      connected,
-      preparedPages: new WeakSet<PuppeteerPage>(),
-    };
-    this.sessions.set(sessionId, session);
-    await this.setupPage(session, connected.page);
-    connected.browser.on('targetcreated', target => {
-      void this.setupTarget(session, target);
-    });
-    return this.publicSession(session);
+    profileLeaseRegistry.acquire([windowId], 'recorder', sessionId);
+    try {
+      const openResult = await openFingerprintWindow(windowId);
+      if (!openResult?.webSocketDebuggerUrl) {
+        throw new Error(
+          `Profile ${windowId} failed to start or did not expose a CDP endpoint. Check the launch warning shown before this RPA error.`,
+        );
+      }
+      const connected = await connectRpaRecorderBrowser(openResult.webSocketDebuggerUrl);
+      await prepareRecorderSession(
+        connected,
+        options.sessionMode || DEFAULT_RPA_RECORDER_SESSION_MODE,
+      );
+      const session: InternalRecorderSession = {
+        sessionId,
+        windowId,
+        startedAt: new Date().toISOString(),
+        events: [],
+        connected,
+        preparedPages: new WeakSet<PuppeteerPage>(),
+      };
+      this.sessions.set(sessionId, session);
+      await this.setupPage(session, connected.page);
+      connected.browser.on('targetcreated', target => {
+        void this.setupTarget(session, target);
+      });
+      return this.publicSession(session);
+    } catch (error) {
+      profileLeaseRegistry.release(sessionId);
+      throw error;
+    }
   }
 
   async stopRecorder(sessionId: string): Promise<RpaRecorderSession> {
@@ -400,6 +418,7 @@ class RpaRecorder {
       throw new Error(`RPA recorder session ${sessionId} not found.`);
     }
     this.sessions.delete(sessionId);
+    profileLeaseRegistry.release(sessionId);
     await session.connected.disconnect().catch(() => undefined);
     return this.publicSession(session);
   }
@@ -417,9 +436,11 @@ class RpaRecorder {
     }
     session.preparedPages.add(page);
     const bindingName = `__chromePowerRpaRecord_${session.sessionId.replace(/[^a-zA-Z0-9_]/g, '_')}`;
-    await page.exposeFunction(bindingName, async (payload: RecorderPayload) => {
-      this.recordPayload(session, payload);
-    }).catch(() => undefined);
+    await page
+      .exposeFunction(bindingName, async (payload: RecorderPayload) => {
+        this.recordPayload(session, payload);
+      })
+      .catch(() => undefined);
     await page.evaluateOnNewDocument(recorderScript(bindingName)).catch(() => undefined);
     await page.evaluate(recorderScript(bindingName)).catch(() => undefined);
     page.on('framenavigated', frame => {

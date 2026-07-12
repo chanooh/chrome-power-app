@@ -13,14 +13,11 @@ import {closeFingerprintWindow, openFingerprintWindow} from '../fingerprint';
 import {connectRpaBrowser} from './automation';
 import {getRpaArtifactRoot, getRpaProfileArtifactDir, getRpaRunRoot} from './artifacts';
 import {executeRpaFlow, type RpaStepExecutionRecord} from './executor';
-import {
-  DEFAULT_RPA_RUN_SESSION_MODE,
-  getFirstGotoUrl,
-  prepareRpaSession,
-} from './session';
+import {DEFAULT_RPA_RUN_SESSION_MODE, getFirstGotoUrl, prepareRpaSession} from './session';
 import {mergeVariables} from './variables';
 import {createLogger} from '../../../shared/utils/logger';
 import {SERVICE_LOGGER_LABEL} from '../constants';
+import {profileLeaseRegistry} from '../automation/profile-lease';
 
 const logger = createLogger(SERVICE_LOGGER_LABEL);
 
@@ -48,7 +45,6 @@ const createControl = (runId: number): RunControl => ({
 
 export class RpaScheduler {
   private controls = new Map<number, RunControl>();
-  private profileLocks = new Map<number, number>();
 
   async startRun(taskId: number, options: RpaRunOptions = {}) {
     const task = await RpaDB.getTaskForRun(taskId);
@@ -59,15 +55,17 @@ export class RpaScheduler {
     if (!bindings.length) {
       throw new Error('RPA task has no selected profiles.');
     }
-    const locked = bindings.filter(binding => this.profileLocks.has(binding.window_id));
+    const locked = bindings.filter(binding => profileLeaseRegistry.get(binding.window_id));
     if (locked.length) {
-      throw new Error(`Profiles are already occupied by another RPA run: ${locked.map(b => b.window_id).join(', ')}`);
+      throw new Error(`Profiles are already occupied: ${locked.map(b => b.window_id).join(', ')}`);
     }
 
     const runId = await RpaDB.createRun(taskId, bindings.length, getRpaArtifactRoot(), options);
-    for (const binding of bindings) {
-      this.profileLocks.set(binding.window_id, runId);
-    }
+    profileLeaseRegistry.acquire(
+      bindings.map(binding => binding.window_id),
+      'rpa',
+      `rpa:${runId}`,
+    );
     const artifactRoot = getRpaRunRoot(runId);
     await RpaDB.updateRun(runId, {artifact_root: artifactRoot});
     const control = createControl(runId);
@@ -112,7 +110,9 @@ export class RpaScheduler {
     const bindings = task.profileBindings || [];
     if (!options.windowIds?.length) return bindings;
     const existingByWindow = new Map(bindings.map(binding => [binding.window_id, binding]));
-    return options.windowIds.map(windowId => existingByWindow.get(windowId) || {window_id: windowId});
+    return options.windowIds.map(
+      windowId => existingByWindow.get(windowId) || {window_id: windowId},
+    );
   }
 
   private async executeRun(
@@ -124,7 +124,10 @@ export class RpaScheduler {
   ) {
     await RpaDB.updateRun(runId, {status: 'running', started_at: now(), message: 'Running.'});
     const queue = [...bindings];
-    const concurrency = Math.max(1, Math.min(options.concurrency || task.defaultConcurrency || 1, bindings.length));
+    const concurrency = Math.max(
+      1,
+      Math.min(options.concurrency || task.defaultConcurrency || 1, bindings.length),
+    );
 
     const workers = Array.from({length: concurrency}).map(async () => {
       while (queue.length && !control.stopRequested) {
@@ -156,11 +159,7 @@ export class RpaScheduler {
         message: (error as Error).message,
       });
     } finally {
-      for (const binding of bindings) {
-        if (this.profileLocks.get(binding.window_id) === runId) {
-          this.profileLocks.delete(binding.window_id);
-        }
-      }
+      profileLeaseRegistry.release(`rpa:${runId}`);
       this.controls.delete(runId);
       emit('rpa-run-updated', await RpaDB.getRun(runId));
     }
@@ -219,7 +218,8 @@ export class RpaScheduler {
         },
       );
       connected = await connectRpaBrowser(browserWSEndpoint);
-      const requestedSessionMode = options.sessionMode || task.sessionMode || DEFAULT_RPA_RUN_SESSION_MODE;
+      const requestedSessionMode =
+        options.sessionMode || task.sessionMode || DEFAULT_RPA_RUN_SESSION_MODE;
       const prepared = await prepareRpaSession({
         context: connected.context,
         fallbackPage: connected.page,
@@ -294,7 +294,7 @@ export class RpaScheduler {
         finished_at: now(),
       });
     } finally {
-      this.profileLocks.delete(binding.window_id);
+      profileLeaseRegistry.releaseWindow(binding.window_id, `rpa:${runId}`);
       if (connected) await connected.disconnect().catch(() => undefined);
       const closePolicy = options.closePolicy || task.closePolicy || 'keepOpen';
       if (this.shouldCloseProfile(closePolicy, success)) {
