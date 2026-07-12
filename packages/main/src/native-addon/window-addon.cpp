@@ -1,4 +1,5 @@
 #include <napi.h>
+#include <algorithm>
 #include <iostream>
 #include <atomic>
 #include <chrono>
@@ -575,11 +576,12 @@ private:
             CFStringGetCString(titleRef, buffer, sizeof(buffer), kCFStringEncodingUTF8);
             CFRelease(titleRef);
             
-            // Extension windows typically don't have "Google Chrome" in their titles
-            // and are usually smaller floating windows
-            if (strstr(buffer, "Google Chrome") == nullptr) {
-                return true;
-            }
+            // Browser windows include the application name in their title. Managed
+            // Chromium uses "Chromium"/"Chrome Power" rather than "Google Chrome".
+            if (strstr(buffer, "Google Chrome") != nullptr ||
+                strstr(buffer, "Chromium") != nullptr ||
+                strstr(buffer, "Chrome Power") != nullptr) return false;
+            return true;
         }
 
         // Check window role
@@ -631,8 +633,10 @@ private:
             CFStringGetCString(titleRef, buffer, sizeof(buffer), kCFStringEncodingUTF8);
             CFRelease(titleRef);
             
-            // Main Chrome window should contain "Google Chrome" in title
-            if (strstr(buffer, "Google Chrome") != nullptr) {
+            // Accept stock Chrome and the managed Chrome Power Chromium build.
+            if (strstr(buffer, "Google Chrome") != nullptr ||
+                strstr(buffer, "Chromium") != nullptr ||
+                strstr(buffer, "Chrome Power") != nullptr) {
                 // Also check subrole to ensure it's a standard window
                 CFStringRef subroleRef;
                 if (AXUIElementCopyAttributeValue(window, kAXSubroleAttribute, (CFTypeRef*)&subroleRef) == kAXErrorSuccess) {
@@ -694,6 +698,28 @@ private:
                 }
             }
             CFRelease(windowArray);
+        }
+
+        // Unknown Chromium-derived titles should not make window management fail.
+        // If every visible window looked like a popup, use the largest one as the
+        // browser window and keep the remaining windows classified as extensions.
+        bool hasMainWindow = false;
+        for (const auto& window : windows) {
+            if (!window.isExtension) {
+                hasMainWindow = true;
+                break;
+            }
+        }
+        if (!hasMainWindow && !windows.empty()) {
+            auto largest = std::max_element(
+                windows.begin(),
+                windows.end(),
+                [](const WindowInfo& left, const WindowInfo& right) {
+                    return static_cast<int64_t>(left.width) * left.height <
+                           static_cast<int64_t>(right.width) * right.height;
+                }
+            );
+            largest->isExtension = false;
         }
         CFRelease(app);
         return windows;
