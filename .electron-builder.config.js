@@ -93,7 +93,9 @@ module.exports = async function () {
       timestamp: false,
       icon: 'buildResources/icon.icns',
       notarize: false,
-      identity: process.env.APPLE_IDENTITY,
+      // Never let local builds auto-select an arbitrary Keychain identity.
+      // A revoked development certificate causes macOS to quarantine the app as malware.
+      identity: process.env.APPLE_IDENTITY || null,
       target: [
         {
           target: 'dmg',
