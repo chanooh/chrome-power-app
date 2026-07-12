@@ -1,13 +1,14 @@
 import {createHash} from 'crypto';
 import {beforeEach, expect, test, vi} from 'vitest';
 import {ipcRenderer} from 'electron';
-import {sha256sum, versions, WindowBridge} from '../src';
+import {sha256sum, versions, SyncBridge, WindowBridge} from '../src';
 
 vi.mock('electron', () => ({
   ipcRenderer: {
     invoke: vi.fn(),
     on: vi.fn(),
     off: vi.fn(),
+    removeListener: vi.fn(),
   },
 }));
 
@@ -33,4 +34,17 @@ test('regenerateFingerprint invokes the window fingerprint IPC', async () => {
 
   await expect(WindowBridge.regenerateFingerprint(42)).resolves.toEqual(result);
   expect(ipcRenderer.invoke).toHaveBeenCalledWith('window-fingerprint-regenerate', 42);
+});
+
+test('mac sync bridge forwards options and permission requests', async () => {
+  vi.mocked(ipcRenderer.invoke).mockResolvedValue({success: true});
+  const request = {
+    masterWindowId: 1,
+    slaveWindowIds: [2, 3],
+    options: {engine: 'hybrid' as const, enableTextSync: true},
+  };
+  await SyncBridge.startSync(request);
+  await SyncBridge.requestPermissions();
+  expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(1, 'multi-window-sync-start', request);
+  expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(2, 'multi-window-sync-request-permissions');
 });

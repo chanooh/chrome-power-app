@@ -1,15 +1,23 @@
 import {ipcRenderer} from 'electron';
+import type {
+  SyncActionResult,
+  SyncCapabilities,
+  SyncOptions,
+  SyncPermissionStatus,
+  SyncSessionStatus,
+  SyncStartRequest,
+  SyncTargetState,
+} from '../../../shared/types/sync';
 
-export interface SyncOptions {
-  enableMouseSync?: boolean;
-  enableKeyboardSync?: boolean;
-  enableWheelSync?: boolean;
-  enableCdpSync?: boolean;
-  mouseMoveThrottleMs?: number;
-  mouseMoveThresholdPx?: number;
-  wheelThrottleMs?: number;
-  cdpSyncIntervalMs?: number;
-}
+export type {
+  SyncActionResult,
+  SyncCapabilities,
+  SyncOptions,
+  SyncPermissionStatus,
+  SyncSessionStatus,
+  SyncStartRequest,
+  SyncTargetState,
+};
 
 export interface MonitorInfo {
   x: number;
@@ -20,8 +28,13 @@ export interface MonitorInfo {
   index: number;
 }
 
+const subscribe = <T>(channel: string, callback: (payload: T) => void) => {
+  const listener = (_event: Electron.IpcRendererEvent, payload: T) => callback(payload);
+  ipcRenderer.on(channel, listener);
+  return () => ipcRenderer.removeListener(channel, listener);
+};
+
 export const SyncBridge = {
-  // Window arrangement (legacy)
   arrangeWindows: (args: {
     mainPid: number;
     childPids: number[];
@@ -29,48 +42,39 @@ export const SyncBridge = {
     size: {width: number; height: number};
     spacing: number;
     monitorIndex?: number;
-  }) => {
-    return ipcRenderer.invoke('window-arrange', args);
-  },
+  }) => ipcRenderer.invoke('window-arrange', args),
 
-  // Get available monitors
-  getMonitors: (): Promise<{success: boolean; monitors: MonitorInfo[]; error?: string}> => {
-    return ipcRenderer.invoke('window-get-monitors');
-  },
+  getMonitors: (): Promise<{success: boolean; monitors: MonitorInfo[]; error?: string}> =>
+    ipcRenderer.invoke('window-get-monitors'),
 
-  // Multi-window synchronization
-  startSync: (args: {
-    masterWindowId: number;
-    slaveWindowIds: number[];
-    options?: SyncOptions;
-  }) => {
-    return ipcRenderer.invoke('multi-window-sync-start', args);
-  },
+  getCapabilities: (): Promise<SyncCapabilities> =>
+    ipcRenderer.invoke('multi-window-sync-capabilities'),
 
-  stopSync: () => {
-    return ipcRenderer.invoke('multi-window-sync-stop');
-  },
+  getPermissionStatus: (): Promise<SyncPermissionStatus> =>
+    ipcRenderer.invoke('multi-window-sync-permissions'),
 
-  getSyncStatus: () => {
-    return ipcRenderer.invoke('multi-window-sync-status');
-  },
+  requestPermissions: (): Promise<SyncPermissionStatus> =>
+    ipcRenderer.invoke('multi-window-sync-request-permissions'),
 
-  // Listen to global shortcuts from main process
-  onShortcutStart: (callback: () => void) => {
-    const listener = () => callback();
-    ipcRenderer.on('sync-shortcut-start', listener);
-    // Return cleanup function
-    return () => {
-      ipcRenderer.removeListener('sync-shortcut-start', listener);
-    };
-  },
+  openPermissionSettings: (kind: 'accessibility' | 'inputMonitoring'): Promise<void> =>
+    ipcRenderer.invoke('multi-window-sync-open-permission-settings', kind),
 
-  onShortcutStop: (callback: () => void) => {
-    const listener = () => callback();
-    ipcRenderer.on('sync-shortcut-stop', listener);
-    // Return cleanup function
-    return () => {
-      ipcRenderer.removeListener('sync-shortcut-stop', listener);
-    };
-  },
+  startSync: (request: SyncStartRequest): Promise<SyncActionResult> =>
+    ipcRenderer.invoke('multi-window-sync-start', request),
+
+  stopSync: (): Promise<SyncActionResult> => ipcRenderer.invoke('multi-window-sync-stop'),
+
+  getSyncStatus: (): Promise<SyncSessionStatus> => ipcRenderer.invoke('multi-window-sync-status'),
+
+  retryTarget: (windowId: number): Promise<SyncActionResult> =>
+    ipcRenderer.invoke('multi-window-sync-retry-target', windowId),
+
+  onStatusUpdated: (callback: (status: SyncSessionStatus) => void) =>
+    subscribe('sync-status-updated', callback),
+
+  onTargetUpdated: (callback: (target: SyncTargetState) => void) =>
+    subscribe('sync-target-updated', callback),
+
+  onShortcutStart: (callback: () => void) => subscribe('sync-shortcut-start', callback),
+  onShortcutStop: (callback: () => void) => subscribe('sync-shortcut-stop', callback),
 };

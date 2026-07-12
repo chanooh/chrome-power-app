@@ -53,24 +53,21 @@ app
       }
     });
 
-    // Register sync control shortcuts (not supported on macOS)
-    if (platform !== 'darwin') {
-      globalShortcut.register('CommandOrControl+Alt+S', () => {
-        logger.info('Global shortcut: Start sync (Ctrl+Alt+S)');
-        const allWindows = BrowserWindow.getAllWindows();
-        allWindows.forEach(win => {
-          win.webContents.send('sync-shortcut-start');
-        });
+    globalShortcut.register('CommandOrControl+Alt+S', () => {
+      logger.info('Global shortcut: Start synchronization');
+      const allWindows = BrowserWindow.getAllWindows();
+      allWindows.forEach(win => {
+        win.webContents.send('sync-shortcut-start');
       });
+    });
 
-      globalShortcut.register('CommandOrControl+Alt+D', () => {
-        logger.info('Global shortcut: Stop sync (Ctrl+Alt+D)');
-        const allWindows = BrowserWindow.getAllWindows();
-        allWindows.forEach(win => {
-          win.webContents.send('sync-shortcut-stop');
-        });
+    globalShortcut.register('CommandOrControl+Alt+D', () => {
+      logger.info('Global shortcut: Stop synchronization');
+      const allWindows = BrowserWindow.getAllWindows();
+      allWindows.forEach(win => {
+        win.webContents.send('sync-shortcut-stop');
       });
-    }
+    });
 
     try {
       await initializeDatabase();
@@ -148,11 +145,10 @@ app.on('before-quit', async () => {
   await db.destroy();
 });
 
-process.on('uncaughtException', (error) => {
+process.on('uncaughtException', error => {
   logger.error('Uncaught exception:', error);
 });
 
-
-process.on('unhandledRejection', (reason) => {
+process.on('unhandledRejection', reason => {
   logger.error('Unhandled rejection:', reason);
 });
