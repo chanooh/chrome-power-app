@@ -1,6 +1,7 @@
 import type {IpcRendererEvent} from 'electron';
 import {ipcRenderer} from 'electron';
 import type {DB, SafeAny} from '../../../shared/types/db';
+import type {FingerprintRegenerationResult} from '../../../shared/types/fingerprint';
 import type {
   OrphanProfile,
   ProfileBackupResult,
@@ -49,6 +50,10 @@ export const WindowBridge = {
   },
   async getFingerprintDiagnostics(windowId: number) {
     const result = await ipcRenderer.invoke('window-fingerprint-diagnostics', windowId);
+    return result;
+  },
+  async regenerateFingerprint(windowId: number): Promise<FingerprintRegenerationResult> {
+    const result = await ipcRenderer.invoke('window-fingerprint-regenerate', windowId);
     return result;
   },
   async getProfileStorageStatus(windowId: number): Promise<ProfileStorageStatus> {

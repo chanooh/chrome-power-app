@@ -74,6 +74,7 @@ export interface FingerprintSnapshot {
   schemaVersion: 2;
   fingerprintEngineVersion: string;
   profileId: string;
+  generationId?: string;
   managedBrowserVersion: string;
   requestedTemplateId: MacDeviceTemplateId;
   templateId: Exclude<MacDeviceTemplateId, 'auto'>;
@@ -107,6 +108,12 @@ export interface FingerprintSnapshot {
     timezoneSource: 'snapshot' | 'proxy';
     localeSource: 'snapshot' | 'proxy';
   };
+}
+
+export interface FingerprintRegenerationResult {
+  success: boolean;
+  message: string;
+  data?: FingerprintSnapshot;
 }
 
 export interface MacDeviceTemplate {

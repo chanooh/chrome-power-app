@@ -165,6 +165,8 @@ const WindowDetail = () => {
               <FingerprintInfo
                 fingerprints={fingerprints}
                 windowId={formValue.id}
+                running={Number(formValue.status) > 1}
+                onFingerprintRegenerated={setFingerprints}
               />
             </div>
           </>

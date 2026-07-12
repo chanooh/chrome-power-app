@@ -3,12 +3,14 @@ import type {DB, SafeAny} from '../../../shared/types/db';
 import type {IWindowTemplate} from '../types/window-template';
 import {GroupDB} from './group';
 import {randomUniqueProfileId} from '../../../shared/utils/random';
+import {FINGERPRINT_TEMPLATE_AUTO_ID} from '../../../shared/constants/fingerprint';
 import {
   generateFingerprintSnapshot,
   parseFingerprintSnapshot,
   serializeFingerprintSnapshot,
 } from '../fingerprint/snapshot';
 import {maskProxyValue} from '../proxy/secure-proxy';
+import {randomUUID} from 'crypto';
 
 const sanitizeWindowProxy = <T extends DB.Window | undefined>(windowData: T): T => {
   if (windowData?.proxy) {
@@ -244,6 +246,38 @@ const ensureFingerprintSnapshot = async (id: number, windowData?: DB.Window) => 
   return snapshot;
 };
 
+const regenerateFingerprintSnapshot = async (id: number) => {
+  const currentWindow = await getById(id);
+  if (!currentWindow) {
+    return {success: false, message: `Window ${id} not found.`};
+  }
+  if (Number(currentWindow.status) > 1) {
+    return {success: false, message: 'Close the profile before regenerating its fingerprint.'};
+  }
+  if (!currentWindow.profile_id) {
+    return {success: false, message: `Window ${id} does not have a profile_id.`};
+  }
+
+  const snapshot = generateFingerprintSnapshot(
+    currentWindow.profile_id,
+    FINGERPRINT_TEMPLATE_AUTO_ID,
+    randomUUID(),
+  );
+  const result = await update(id, {
+    ...currentWindow,
+    ua: snapshot.ua,
+    fingerprint: serializeFingerprintSnapshot(snapshot),
+  });
+  if (!result.success) {
+    return result;
+  }
+  return {
+    success: true,
+    message: 'Fingerprint regenerated with Auto template.',
+    data: snapshot,
+  };
+};
+
 const remove = async (id: number) => {
   return await db('window').update({status: 0}).where({id});
 };
@@ -330,6 +364,7 @@ export const WindowDB = {
   update,
   create,
   ensureFingerprintSnapshot,
+  regenerateFingerprintSnapshot,
   remove,
   deleteAll,
   batchRemove,

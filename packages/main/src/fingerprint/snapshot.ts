@@ -172,13 +172,18 @@ export const normalizeMacDeviceTemplateId = (
 export const resolveMacDeviceTemplate = (
   profileId: string,
   requestedTemplateId?: string | null,
+  generationId?: string,
 ) => {
   const normalizedTemplateId = normalizeMacDeviceTemplateId(requestedTemplateId);
+  const stableProfileKey = generationId ? `${profileId}:generation:${generationId}` : profileId;
   let templateId: ConcreteTemplateId;
   if (normalizedTemplateId === FINGERPRINT_TEMPLATE_AUTO_ID) {
     templateId =
       TEMPLATE_IDS[
-        stableIndex(`template:${profileId}:${MANAGED_CHROMIUM_VERSION}:${FINGERPRINT_ENGINE_VERSION}`, TEMPLATE_IDS.length)
+        stableIndex(
+          `template:${stableProfileKey}:${MANAGED_CHROMIUM_VERSION}:${FINGERPRINT_ENGINE_VERSION}`,
+          TEMPLATE_IDS.length,
+        )
       ];
   } else {
     templateId = normalizedTemplateId as ConcreteTemplateId;
@@ -233,25 +238,32 @@ const createMediaDevices = (
 export const generateFingerprintSnapshot = (
   profileId: string,
   requestedTemplateId?: string | null,
+  generationId?: string,
 ): FingerprintSnapshot => {
   if (!profileId) {
     throw new Error('Cannot generate a fingerprint snapshot without profile_id');
   }
 
+  const normalizedGenerationId = generationId?.trim() || undefined;
+  const stableProfileKey = normalizedGenerationId
+    ? `${profileId}:generation:${normalizedGenerationId}`
+    : profileId;
   const {requestedTemplateId: normalizedTemplateId, template} = resolveMacDeviceTemplate(
     profileId,
     requestedTemplateId,
+    normalizedGenerationId,
   );
   const localeTimezone =
     LOCALE_TIMEZONE_POOL[
-      stableIndex(`locale:${profileId}:${template.id}`, LOCALE_TIMEZONE_POOL.length)
+      stableIndex(`locale:${stableProfileKey}:${template.id}`, LOCALE_TIMEZONE_POOL.length)
     ];
-  const seed = stableId(profileId, `snapshot:${template.id}`);
+  const seed = stableId(stableProfileKey, `snapshot:${template.id}`);
 
   return {
     schemaVersion: 2,
     fingerprintEngineVersion: FINGERPRINT_ENGINE_VERSION,
     profileId,
+    ...(normalizedGenerationId ? {generationId: normalizedGenerationId} : {}),
     managedBrowserVersion: MANAGED_CHROMIUM_VERSION,
     requestedTemplateId: normalizedTemplateId,
     templateId: template.id,
@@ -301,19 +313,19 @@ export const generateFingerprintSnapshot = (
       description: template.webgpu.description,
     },
     noise: {
-      canvas: stableUint32(stableId(profileId, 'canvas:native')),
-      audio: stableUint32(stableId(profileId, 'audio:native')),
-      webgl: stableUint32(stableId(profileId, 'webgl:native')),
+      canvas: stableUint32(stableId(stableProfileKey, 'canvas:native')),
+      audio: stableUint32(stableId(stableProfileKey, 'audio:native')),
+      webgl: stableUint32(stableId(stableProfileKey, 'webgl:native')),
     },
     canvas: {
       mode: 'stable-native-noise',
-      seed: stableId(profileId, 'canvas'),
+      seed: stableId(stableProfileKey, 'canvas'),
     },
     audio: {
       mode: 'stable-native-noise',
-      seed: stableId(profileId, 'audio'),
+      seed: stableId(stableProfileKey, 'audio'),
     },
-    mediaDevices: createMediaDevices(profileId, template.mediaLabels),
+    mediaDevices: createMediaDevices(stableProfileKey, template.mediaLabels),
     networkConsistency: {
       proxyRequired: true,
       webrtcPolicy: 'disable_non_proxied_udp',
@@ -334,6 +346,7 @@ const isFingerprintSnapshotV2 = (value: unknown): value is FingerprintSnapshot =
     value.schemaVersion === 2 &&
     value.fingerprintEngineVersion === FINGERPRINT_ENGINE_VERSION &&
     typeof value.profileId === 'string' &&
+    (value.generationId === undefined || typeof value.generationId === 'string') &&
     value.managedBrowserVersion === MANAGED_CHROMIUM_VERSION &&
     typeof value.ua === 'string' &&
     typeof value.timezone === 'string' &&

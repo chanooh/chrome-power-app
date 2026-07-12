@@ -150,6 +150,10 @@ export const initWindowService = () => {
     return await runFingerprintDiagnostics(window);
   });
 
+  ipcMain.handle('window-fingerprint-regenerate', async (_, windowId: number) => {
+    return await WindowDB.regenerateFingerprintSnapshot(windowId);
+  });
+
   ipcMain.handle('window-profile-storage-status', async (_, windowId: number) => {
     const window = await WindowDB.getById(windowId);
     if (!window) {

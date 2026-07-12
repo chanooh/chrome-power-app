@@ -1,8 +1,11 @@
 import './index.css';
-import {Button, Space, Tag, Typography, message} from 'antd';
-import {ExperimentOutlined} from '@ant-design/icons';
+import {Button, Modal, Space, Tag, Tooltip, Typography, message} from 'antd';
+import {ExperimentOutlined, ReloadOutlined} from '@ant-design/icons';
 import {useMemo, useState} from 'react';
-import type {FingerprintDiagnosticResult, FingerprintSnapshot} from '../../../../../../shared/types/fingerprint';
+import type {
+  FingerprintDiagnosticResult,
+  FingerprintSnapshot,
+} from '../../../../../../shared/types/fingerprint';
 import type {SafeAny} from '../../../../../../shared/types/db';
 import {WindowBridge} from '#preload';
 
@@ -19,12 +22,17 @@ const formatList = (value?: unknown[]) => (value?.length ? value.join(', ') : 'P
 const FingerprintInfo = ({
   fingerprints,
   windowId,
+  running = false,
+  onFingerprintRegenerated,
 }: {
   fingerprints: SafeAny;
   windowId?: number;
+  running?: boolean;
+  onFingerprintRegenerated?: (snapshot: FingerprintSnapshot) => void;
 }) => {
   const [diagnostics, setDiagnostics] = useState<FingerprintDiagnosticResult | null>(null);
   const [diagnosticLoading, setDiagnosticLoading] = useState(false);
+  const [regenerationLoading, setRegenerationLoading] = useState(false);
   const [messageApi, contextHolder] = message.useMessage({
     duration: 3,
     top: 100,
@@ -114,20 +122,69 @@ const FingerprintInfo = ({
     }
   };
 
+  const confirmRegeneration = () => {
+    if (!windowId) {
+      return;
+    }
+    Modal.confirm({
+      title: 'Regenerate fingerprint?',
+      content:
+        'A new Auto fingerprint will be used on the next launch. Profile data, cookies and extensions are unchanged.',
+      okText: 'Regenerate',
+      cancelText: 'Cancel',
+      onOk: async () => {
+        setRegenerationLoading(true);
+        try {
+          const result = await WindowBridge.regenerateFingerprint(windowId);
+          if (!result.success || !result.data) {
+            messageApi.error(result.message);
+            return;
+          }
+          setDiagnostics(null);
+          onFingerprintRegenerated?.(result.data);
+          messageApi.success(result.message);
+        } catch (error) {
+          messageApi.error((error as Error).message || 'Fingerprint regeneration failed');
+        } finally {
+          setRegenerationLoading(false);
+        }
+      },
+    });
+  };
+
   return (
     <div className="fingerprint-wrapper">
       {contextHolder}
       <div className="fingerprint-header">
         <Text strong>Fingerprint</Text>
         {windowId && (
-          <Button
-            size="small"
-            icon={<ExperimentOutlined />}
-            loading={diagnosticLoading}
-            onClick={runDiagnostics}
-          >
-            Diagnose
-          </Button>
+          <Space size={6}>
+            <Tooltip
+              title={
+                running
+                  ? 'Close the profile before regenerating'
+                  : 'Generate a new Auto fingerprint'
+              }
+            >
+              <Button
+                size="small"
+                icon={<ReloadOutlined />}
+                loading={regenerationLoading}
+                disabled={running}
+                onClick={confirmRegeneration}
+              >
+                Regenerate
+              </Button>
+            </Tooltip>
+            <Button
+              size="small"
+              icon={<ExperimentOutlined />}
+              loading={diagnosticLoading}
+              onClick={runDiagnostics}
+            >
+              Diagnose
+            </Button>
+          </Space>
         )}
       </div>
       {diagnostics && (

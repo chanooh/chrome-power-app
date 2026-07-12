@@ -23,6 +23,20 @@ describe('macOS fingerprint snapshot', () => {
     expect(second.audio.seed).not.toBe(first.audio.seed);
   });
 
+  test('generates a new stable Auto snapshot when generation id changes', () => {
+    const first = generateFingerprintSnapshot('profile-alpha', 'auto', 'generation-one');
+    const repeated = generateFingerprintSnapshot('profile-alpha', 'auto', 'generation-one');
+    const rotated = generateFingerprintSnapshot('profile-alpha', 'auto', 'generation-two');
+
+    expect(repeated).toEqual(first);
+    expect(first.generationId).toBe('generation-one');
+    expect(rotated.generationId).toBe('generation-two');
+    expect(rotated.seed).not.toBe(first.seed);
+    expect(rotated.canvas.seed).not.toBe(first.canvas.seed);
+    expect(rotated.audio.seed).not.toBe(first.audio.seed);
+    expect(rotated.mediaDevices[0].deviceId).not.toBe(first.mediaDevices[0].deviceId);
+  });
+
   test('uses a requested concrete macOS template', () => {
     const snapshot = generateFingerprintSnapshot('profile-pro', 'macbook-pro-14-m4');
 
